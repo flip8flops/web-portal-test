@@ -17,8 +17,8 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Copy healthcheck script from build context
-COPY healthcheck.cjs ./healthcheck.cjs
+# Install curl for healthcheck
+RUN apk add --no-cache curl
 
 # Next.js standalone output
 COPY --from=builder /app/.next/standalone ./
@@ -26,7 +26,7 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD node healthcheck.cjs
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD curl -f http://localhost:3000/api/health || exit 1
 
 CMD ["node", "server.js"]
 
