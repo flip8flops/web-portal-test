@@ -17,8 +17,8 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Install wget for healthcheck
-RUN apk add --no-cache wget
+# Copy healthcheck script from build context
+COPY healthcheck.js ./healthcheck.js
 
 # Next.js standalone output
 COPY --from=builder /app/.next/standalone ./
@@ -26,7 +26,7 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://localhost:3000/api/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD node healthcheck.js
 
 CMD ["node", "server.js"]
 
