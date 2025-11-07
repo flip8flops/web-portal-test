@@ -14,13 +14,18 @@ Minimal Next.js 14 (App Router) portal with TypeScript, Tailwind, ESLint/Prettie
    npm ci
    ```
 
-2. (Optional) set environment name:
+2. Set up environment variables:
    
-   Create `.env.local` if desired:
+   Copy `.env.local.example` to `.env.local`:
    
    ```bash
-   echo NEXT_PUBLIC_APP_NAME="Metagapura Portal" > .env.local
+   cp .env.local.example .env.local
    ```
+   
+   Edit `.env.local` and fill in your Supabase credentials:
+   - `NEXT_PUBLIC_SUPABASE_URL`: Your Supabase project URL (from Supabase dashboard)
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Your Supabase anonymous key (from Supabase dashboard)
+   - `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase service role key (from Supabase dashboard)
 
 3. Run dev server:
    
@@ -58,8 +63,26 @@ The image exposes port 3000 and includes a HEALTHCHECK hitting `/api/health`.
 
 GitHub Actions workflow runs lint and build on PRs and pushes to `main`.
 
+## Adding shadcn/ui Components
+
+This project uses [shadcn/ui](https://ui.shadcn.com/) for UI components. To add new components:
+
+```bash
+npx shadcn@latest add [component-name]
+```
+
+For example:
+```bash
+npx shadcn@latest add dialog
+npx shadcn@latest add dropdown-menu
+```
+
+Components will be added to `components/ui/` and can be imported using the `@/components/ui` alias.
+
 ## Notes
 - Next.js standalone output is enabled in `next.config.mjs`.
 - Strict TypeScript is enabled.
+- Supabase authentication and RLS-protected notes are implemented.
+- Environment variables (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`) are configured in production via Coolify.
 
 
