@@ -79,10 +79,24 @@ npx shadcn@latest add dropdown-menu
 
 Components will be added to `components/ui/` and can be imported using the `@/components/ui` alias.
 
+## Production Deployment (Coolify)
+
+**Important:** For Next.js `NEXT_PUBLIC_*` environment variables to work, they must be set in Coolify **BEFORE** the build runs.
+
+1. In Coolify, go to your application settings
+2. Add these environment variables:
+   - `NEXT_PUBLIC_SUPABASE_URL` = `https://your-project.supabase.co`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` = `your-anon-key`
+   - `NEXT_PUBLIC_APP_NAME` = `Metagapura Portal` (optional)
+3. **Save the environment variables**
+4. **Trigger a rebuild** - The Dockerfile uses ARG to pass these as build arguments
+
+The Dockerfile is configured to accept these as build arguments, which Coolify should automatically pass during the build process.
+
 ## Notes
 - Next.js standalone output is enabled in `next.config.mjs`.
 - Strict TypeScript is enabled.
 - Supabase authentication and RLS-protected notes are implemented.
-- Environment variables (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`) are configured in production via Coolify.
+- Environment variables must be set in Coolify before building (they're embedded at build time).
 
 
