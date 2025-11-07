@@ -26,7 +26,8 @@ export default function LoginPage() {
       });
 
       if (error) {
-        setMessage({ type: 'error', text: error.message });
+        console.error('Supabase auth error:', error);
+        setMessage({ type: 'error', text: error.message || 'Failed to send magic link. Please check your email and try again.' });
       } else {
         setMessage({
           type: 'success',
@@ -34,11 +35,27 @@ export default function LoginPage() {
         });
         setEmail('');
       }
-    } catch (err) {
-      setMessage({
-        type: 'error',
-        text: 'An unexpected error occurred. Please try again.',
-      });
+    } catch (err: any) {
+      console.error('Login error:', err);
+      const errorMessage = err?.message || err?.toString() || 'Unknown error';
+      
+      // Provide more specific error messages
+      if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError') || errorMessage.includes('fetch')) {
+        setMessage({
+          type: 'error',
+          text: 'Failed to connect to authentication service. Please verify that NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are correctly set in your Coolify environment variables.',
+        });
+      } else if (errorMessage.includes('CORS')) {
+        setMessage({
+          type: 'error',
+          text: 'CORS error: Please add your domain to Supabase allowed origins in Authentication > URL Configuration.',
+        });
+      } else {
+        setMessage({
+          type: 'error',
+          text: `Error: ${errorMessage}. Please check the browser console for more details.`,
+        });
+      }
     } finally {
       setLoading(false);
     }
