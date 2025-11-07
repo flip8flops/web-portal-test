@@ -17,6 +17,10 @@ export default function LoginPage() {
     setLoading(true);
     setMessage(null);
 
+    // Note: In Next.js, NEXT_PUBLIC_* vars are embedded at build time
+    // If env vars are set in Coolify at runtime, they won't be available in the client
+    // The validation will happen when Supabase client tries to connect
+
     try {
       const { error } = await supabase.auth.signInWithOtp({
         email,
@@ -41,19 +45,24 @@ export default function LoginPage() {
       
       // Provide more specific error messages
       if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError') || errorMessage.includes('fetch')) {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+        const isPlaceholder = supabaseUrl.includes('placeholder') || !supabaseUrl.includes('.supabase.co');
+        
         setMessage({
           type: 'error',
-          text: 'Failed to connect to authentication service. Please verify that NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are correctly set in your Coolify environment variables.',
+          text: isPlaceholder 
+            ? 'Configuration Error: Supabase environment variables are not set. In Coolify, ensure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are set BEFORE building, then rebuild the application.'
+            : 'Network Error: Unable to connect to Supabase. Please check: 1) Supabase project is active, 2) Domain is added to Supabase allowed origins, 3) Environment variables are correct.',
         });
       } else if (errorMessage.includes('CORS')) {
         setMessage({
           type: 'error',
-          text: 'CORS error: Please add your domain to Supabase allowed origins in Authentication > URL Configuration.',
+          text: 'CORS Error: Add https://portal.metagapura.com to Supabase Authentication > URL Configuration > Redirect URLs.',
         });
       } else {
         setMessage({
           type: 'error',
-          text: `Error: ${errorMessage}. Please check the browser console for more details.`,
+          text: `Error: ${errorMessage}. Check browser console (F12) for details.`,
         });
       }
     } finally {

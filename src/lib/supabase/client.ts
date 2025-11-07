@@ -5,10 +5,22 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholde
 
 // Validate configuration in browser (client-side only)
 if (typeof window !== 'undefined') {
-  if (!supabaseUrl || supabaseUrl.includes('placeholder') || !supabaseAnonKey || supabaseAnonKey.includes('placeholder')) {
-    console.error('Supabase configuration error: Missing or invalid environment variables');
-    console.error('NEXT_PUBLIC_SUPABASE_URL:', supabaseUrl ? 'Set' : 'Missing');
-    console.error('NEXT_PUBLIC_SUPABASE_ANON_KEY:', supabaseAnonKey ? 'Set' : 'Missing');
+  const isValidUrl = supabaseUrl && 
+                     supabaseUrl.startsWith('https://') && 
+                     supabaseUrl.includes('.supabase.co') &&
+                     !supabaseUrl.includes('placeholder');
+  
+  const isValidKey = supabaseAnonKey && 
+                     supabaseAnonKey.length > 20 && 
+                     !supabaseAnonKey.includes('placeholder');
+  
+  if (!isValidUrl || !isValidKey) {
+    console.error('⚠️ Supabase configuration error: Invalid environment variables');
+    console.error('NEXT_PUBLIC_SUPABASE_URL:', supabaseUrl);
+    console.error('  Valid:', isValidUrl);
+    console.error('NEXT_PUBLIC_SUPABASE_ANON_KEY:', supabaseAnonKey ? `${supabaseAnonKey.substring(0, 10)}...` : 'Missing');
+    console.error('  Valid:', isValidKey);
+    console.error('Please check your Coolify environment variables are set correctly.');
   }
 }
 
