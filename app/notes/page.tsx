@@ -86,25 +86,40 @@ export default function NotesPage() {
           .schema('test')
           .from('note_summaries')
           .select('summary')
-          .single();
+          .maybeSingle(); // Use maybeSingle() to handle no rows gracefully
 
         if (error) {
-          // No summary exists yet, or error fetching - that's okay
-          if (error.code !== 'PGRST116') { // PGRST116 = no rows returned
-            console.warn('Error fetching summary:', error);
-          }
-          if (mounted) {
-            setSummary(null);
+          // Check for specific error codes
+          if (error.code === 'PGRST116') {
+            // PGRST116 = no rows returned - this is fine, no summary exists yet
+            if (mounted) {
+              setSummary(null);
+            }
+          } else {
+            // Other errors (like 403) should be logged
+            console.error('Error fetching summary:', error);
+            console.error('Error code:', error.code);
+            console.error('Error message:', error.message);
+            if (mounted) {
+              setSummary(null);
+            }
           }
         } else if (data?.summary) {
           if (mounted) {
             setSummary(data.summary);
             setSummaryError(null);
           }
+        } else {
+          // No data returned and no error - no summary exists
+          if (mounted) {
+            setSummary(null);
+          }
         }
       } catch (err) {
-        console.warn('Error fetching existing summary:', err);
-        // Don't set error state - just leave summary as null
+        console.error('Error fetching existing summary (exception):', err);
+        if (mounted) {
+          setSummary(null);
+        }
       }
     };
 

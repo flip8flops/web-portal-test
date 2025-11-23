@@ -75,9 +75,14 @@ export async function GET(request: NextRequest): Promise<NextResponse<SummaryRes
         .from('note_summaries')
         .select('last_generated_at, generation_count, max_generations_per_day')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle(); // Use maybeSingle() instead of single() to handle no rows gracefully
 
-      if (!checkError && existingSummary) {
+      // If no record exists, this is the first generation - allow it
+      if (checkError && checkError.code !== 'PGRST116') {
+        // PGRST116 = no rows returned, which is fine for first-time users
+        console.error('Error checking rate limit:', checkError);
+        // Continue anyway - don't block on check errors
+      } else if (existingSummary) {
         const maxGenerationsPerDay = existingSummary.max_generations_per_day || 2;
         let generationCount = existingSummary.generation_count || 0;
         const now = new Date();
@@ -176,7 +181,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<SummaryRes
         .from('note_summaries')
         .select('last_generated_at, generation_count, max_generations_per_day')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle(); // Use maybeSingle() to handle no rows gracefully
 
       let newGenerationCount = 1;
       const maxGenerationsPerDay = existingRecord?.max_generations_per_day || 2;
@@ -213,15 +218,24 @@ export async function GET(request: NextRequest): Promise<NextResponse<SummaryRes
         .select('updated_at')
         .single();
 
-      if (!upsertError && data) {
+      if (upsertError) {
+        console.error('Error storing summary in database:', upsertError);
+        console.error('Error details:', JSON.stringify(upsertError, null, 2));
+        // Don't fail the request, but log the error clearly
+        // The summary was generated successfully, storage failure is secondary
+      } else if (data) {
         updatedAt = data.updated_at;
         console.log(`Summary stored successfully for user ${userId}. Generation count: ${newGenerationCount}/${maxGenerationsPerDay}`);
-      } else if (upsertError) {
-        console.error('Error storing summary:', upsertError);
+      } else {
+        console.warn('Summary upsert returned no data and no error');
       }
     } catch (storageError) {
-      // Log but don't fail - summary storage is optional
-      console.warn('Failed to store summary in database:', storageError);
+      // Log storage errors but don't fail the request
+      console.error('Failed to store summary in database (exception):', storageError);
+      if (storageError instanceof Error) {
+        console.error('Storage error message:', storageError.message);
+        console.error('Storage error stack:', storageError.stack);
+      }
     }
 
     return NextResponse.json({
