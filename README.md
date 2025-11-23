@@ -7,6 +7,12 @@ A modern, secure web portal built with Next.js 14 that provides personal note-ta
 ![Supabase](https://img.shields.io/badge/Supabase-2.80-green?style=flat-square&logo=supabase)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind-4.1-38bdf8?style=flat-square&logo=tailwind-css)
 
+<img width="2400" height="1417" alt="image" src="https://github.com/user-attachments/assets/427fab2f-ff48-4d2b-a255-cd8f8ec41de6" />
+
+<img width="1871" height="1297" alt="image" src="https://github.com/user-attachments/assets/3bce0a3f-a69b-4787-8528-815513703778" />
+
+
+
 ## 🌟 Features
 
 - **🔐 Secure Authentication**: Magic link authentication via Supabase Auth
