@@ -180,8 +180,10 @@ The notes page allows you to create, manage, and view your personal notes. The A
        UNIQUE(user_id)
      );
 
+     -- Enable Row Level Security
      ALTER TABLE test.note_summaries ENABLE ROW LEVEL SECURITY;
 
+     -- Create RLS policies
      CREATE POLICY "Users can view own summaries"
        ON test.note_summaries FOR SELECT
        USING (auth.uid() = user_id);
@@ -194,6 +196,14 @@ The notes page allows you to create, manage, and view your personal notes. The A
        ON test.note_summaries FOR UPDATE
        USING (auth.uid() = user_id);
      ```
+
+     **Important**: After creating the table, verify RLS is enabled by running:
+     ```sql
+     SELECT tablename, rowsecurity 
+     FROM pg_tables 
+     WHERE schemaname = 'test' AND tablename = 'note_summaries';
+     ```
+     The `rowsecurity` column should show `true`. If it shows `false`, run `ALTER TABLE test.note_summaries ENABLE ROW LEVEL SECURITY;` again.
 
      **Note**: The `max_generations_per_day` field (default 2) can be adjusted in the database to change the daily limit for testing. Only you (the admin) should modify this value.
 
