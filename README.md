@@ -1,102 +1,279 @@
 # Metagapura Portal
 
-Minimal Next.js 14 (App Router) portal with TypeScript, Tailwind, ESLint/Prettier, and Docker (standalone).
+A modern, secure web portal built with Next.js 14 that provides personal note-taking with AI-powered summarization. Features include Supabase authentication, Row-Level Security (RLS) for data isolation, and integration with n8n workflows for intelligent note analysis.
 
-## Requirements
-- Node 20.x
-- npm
+![Next.js](https://img.shields.io/badge/Next.js-14-black?style=flat-square&logo=next.js)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?style=flat-square&logo=typescript)
+![Supabase](https://img.shields.io/badge/Supabase-2.80-green?style=flat-square&logo=supabase)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind-4.1-38bdf8?style=flat-square&logo=tailwind-css)
 
-## Getting Started (Local)
+## 🌟 Features
 
-1. Install dependencies:
-   
+- **🔐 Secure Authentication**: Magic link authentication via Supabase Auth
+- **📝 Personal Notes**: Create and manage personal notes with a 280-character limit
+- **🤖 AI Summarization**: Generate intelligent summaries of your notes using AI (via n8n workflows)
+- **🔒 Row-Level Security**: Database-level security ensuring users can only access their own data
+- **🎨 Modern UI**: Beautiful, responsive interface built with shadcn/ui and Tailwind CSS
+- **📊 Dashboard**: Overview dashboard with real-time statistics
+- **⚡ Rate Limiting**: Prevents abuse with 1 summary generation per day per user
+
+## 🏗️ Architecture
+
+### Tech Stack
+
+**Frontend:**
+- [Next.js 14](https://nextjs.org/) - React framework with App Router
+- [TypeScript](https://www.typescriptlang.org/) - Type-safe development
+- [Tailwind CSS v4](https://tailwindcss.com/) - Utility-first CSS framework
+- [shadcn/ui](https://ui.shadcn.com/) - High-quality component library
+- [Lucide React](https://lucide.dev/) - Beautiful icon library
+
+**Backend & Database:**
+- [Supabase](https://supabase.com/) - Backend-as-a-Service
+  - PostgreSQL database with Row-Level Security (RLS)
+  - Authentication service
+  - Real-time capabilities
+
+**Automation & AI:**
+- [n8n](https://n8n.io/) - Workflow automation platform
+  - Webhook-based integration
+  - LLM integration for note summarization
+  - Secure Basic Auth for webhook calls
+
+### System Architecture
+
+```
+┌─────────────┐
+│   Browser   │
+│  (Next.js)  │
+└──────┬──────┘
+       │
+       ├──► Supabase Auth (Magic Links)
+       │
+       ├──► Supabase Database (PostgreSQL + RLS)
+       │    └──► test.notes (user notes)
+       │    └──► test.note_summaries (AI summaries)
+       │
+       └──► API Route (/api/notes/summary)
+            │
+            └──► n8n Webhook
+                 │
+                 ├──► Fetches user notes from Supabase
+                 ├──► Processes through LLM
+                 └──► Returns AI-generated summary
+```
+
+### Security Features
+
+- **Row-Level Security (RLS)**: Database policies ensure users can only access their own notes
+- **Server-Side Authentication**: API routes validate user sessions before processing requests
+- **Environment Variables**: Sensitive credentials stored securely, never exposed to client
+- **Rate Limiting**: Prevents abuse of AI summarization service (1 per day per user)
+- **Basic Auth**: Secure webhook communication with n8n using Basic Authentication
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- Node.js 20.x or higher
+- npm or yarn
+- Supabase account and project
+- n8n instance (optional, for AI summarization feature)
+
+### Installation
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/yourusername/web-portal-test.git
+   cd web-portal-test
+   ```
+
+2. **Install dependencies**
+
    ```bash
    npm ci
    ```
 
-2. Set up environment variables:
-   
-   Copy `.env.local.example` to `.env.local`:
-   
-   ```bash
-   cp .env.local.example .env.local
-   ```
-   
-   Edit `.env.local` and fill in your Supabase credentials:
-   - `NEXT_PUBLIC_SUPABASE_URL`: Your Supabase project URL (from Supabase dashboard)
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Your Supabase anonymous key (from Supabase dashboard)
-   - `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase service role key (from Supabase dashboard)
+3. **Set up environment variables**
 
-3. Run dev server:
-   
+   Create a `.env.local` file in the root directory:
+
+   ```env
+   # Supabase Configuration
+   NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+   SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+   # n8n Webhook Configuration (optional, for AI summarization)
+   N8N_NOTES_WEBHOOK_URL=https://your-n8n-instance.com/webhook/notes-summary
+   N8N_NOTES_WEBHOOK_USER=your-webhook-username
+   N8N_NOTES_WEBHOOK_PASS=your-webhook-password
+
+   # Optional
+   NEXT_PUBLIC_APP_NAME=Metagapura Portal
+   ```
+
+4. **Configure Supabase**
+
+   - Create a schema named `test` in your Supabase project
+   - Create a `notes` table with RLS enabled:
+     ```sql
+     CREATE TABLE test.notes (
+       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+       user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+       content TEXT NOT NULL CHECK (char_length(content) <= 280),
+       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     );
+
+     ALTER TABLE test.notes ENABLE ROW LEVEL SECURITY;
+
+     CREATE POLICY "Users can view own notes"
+       ON test.notes FOR SELECT
+       USING (auth.uid() = user_id);
+
+     CREATE POLICY "Users can insert own notes"
+       ON test.notes FOR INSERT
+       WITH CHECK (auth.uid() = user_id);
+     ```
+
+   - Create a trigger to auto-set `user_id`:
+     ```sql
+     CREATE OR REPLACE FUNCTION test.set_user_id()
+     RETURNS TRIGGER AS $$
+     BEGIN
+       NEW.user_id := auth.uid();
+       RETURN NEW;
+     END;
+     $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+     CREATE TRIGGER set_user_id_trigger
+       BEFORE INSERT ON test.notes
+       FOR EACH ROW
+       EXECUTE FUNCTION test.set_user_id();
+     ```
+
+   - (Optional) Create `note_summaries` table for AI summaries:
+     ```sql
+     CREATE TABLE test.note_summaries (
+       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+       user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+       summary TEXT NOT NULL,
+       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       UNIQUE(user_id)
+     );
+
+     ALTER TABLE test.note_summaries ENABLE ROW LEVEL SECURITY;
+
+     CREATE POLICY "Users can view own summaries"
+       ON test.note_summaries FOR SELECT
+       USING (auth.uid() = user_id);
+
+     CREATE POLICY "Users can insert own summaries"
+       ON test.note_summaries FOR INSERT
+       WITH CHECK (auth.uid() = user_id);
+
+     CREATE POLICY "Users can update own summaries"
+       ON test.note_summaries FOR UPDATE
+       USING (auth.uid() = user_id);
+     ```
+
+   - Configure redirect URLs in Supabase Dashboard:
+     - Go to **Authentication > URL Configuration**
+     - Add redirect URLs: `http://localhost:3000/notes` (development) and your production URL
+
+5. **Run the development server**
+
    ```bash
    npm run dev
    ```
 
-4. Build and start:
-   
-   ```bash
-   npm run build
-   npm start
-   ```
+   Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-- App: http://localhost:3000
-- Health: http://localhost:3000/api/health
-
-## Docker
-
-Build image:
+## 📦 Building for Production
 
 ```bash
-docker build -t web-portal-test:latest .
+npm run build
+npm start
 ```
 
-Run container:
+The app uses Next.js standalone output for optimized Docker deployments.
+
+## 🐳 Docker
+
+Build and run with Docker:
 
 ```bash
-docker run --rm -p 3000:3000 web-portal-test:latest
+docker build -t metagapura-portal:latest .
+docker run --rm -p 3000:3000 metagapura-portal:latest
 ```
 
-The image exposes port 3000 and includes a HEALTHCHECK hitting `/api/health`.
+## 🔌 n8n Integration
 
-## CI
+The portal integrates with n8n workflows for AI-powered note summarization. The n8n workflow:
 
-GitHub Actions workflow runs lint and build on PRs and pushes to `main`.
+1. Receives a `user_id` parameter via webhook
+2. Fetches all notes for that user from Supabase
+3. Processes notes through an LLM (configured in n8n)
+4. Returns a plain text summary
 
-## Adding shadcn/ui Components
+**Rate Limiting**: To prevent abuse, users can generate one summary per 24 hours. The system tracks the last generation time and enforces this limit at the API level.
 
-This project uses [shadcn/ui](https://ui.shadcn.com/) for UI components. To add new components:
+## 🛠️ Development
+
+### Adding shadcn/ui Components
+
+This project uses [shadcn/ui](https://ui.shadcn.com/) for UI components:
 
 ```bash
 npx shadcn@latest add [component-name]
 ```
 
-For example:
-```bash
-npx shadcn@latest add dialog
-npx shadcn@latest add dropdown-menu
+Components are added to `components/ui/` and can be imported using the `@/components/ui` alias.
+
+### Project Structure
+
+```
+web-portal-test/
+├── app/                    # Next.js App Router pages
+│   ├── api/               # API routes
+│   │   └── notes/
+│   │       └── summary/   # Summary generation endpoint
+│   ├── login/             # Login page
+│   ├── notes/              # Notes page
+│   └── page.tsx            # Dashboard
+├── components/            # React components
+│   ├── ui/                # shadcn/ui components
+│   ├── navbar.tsx         # Top navigation
+│   └── sidebar.tsx         # Side navigation
+├── src/
+│   └── lib/
+│       └── supabase/
+│           ├── client.ts   # Client-side Supabase client
+│           └── server.ts   # Server-side auth helper
+└── public/                # Static assets
 ```
 
-Components will be added to `components/ui/` and can be imported using the `@/components/ui` alias.
+## 🔒 Security Considerations
 
-## Production Deployment (Coolify)
+- All API routes validate user authentication server-side
+- Database queries use RLS policies for data isolation
+- Environment variables are never exposed to the client
+- Webhook credentials are stored server-side only
+- Rate limiting prevents service abuse
 
-**Important:** For Next.js `NEXT_PUBLIC_*` environment variables to work, they must be set in Coolify **BEFORE** the build runs.
+## 📝 License
 
-1. In Coolify, go to your application settings
-2. Add these environment variables:
-   - `NEXT_PUBLIC_SUPABASE_URL` = `https://your-project.supabase.co`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` = `your-anon-key`
-   - `NEXT_PUBLIC_APP_NAME` = `Metagapura Portal` (optional)
-3. **Save the environment variables**
-4. **Trigger a rebuild** - The Dockerfile uses ARG to pass these as build arguments
+This project is licensed under the UNLICENSED license.
 
-The Dockerfile is configured to accept these as build arguments, which Coolify should automatically pass during the build process.
+## 🤝 Contributing
 
-## Notes
-- Next.js standalone output is enabled in `next.config.mjs`.
-- Strict TypeScript is enabled.
-- Supabase authentication and RLS-protected notes are implemented.
-- Environment variables must be set in Coolify before building (they're embedded at build time).
+Contributions are welcome! Please feel free to submit a Pull Request.
 
+## 📧 Support
 
+For issues and questions, please open an issue on GitHub.
+
+---
+
+Built with ❤️ using Next.js, Supabase, and n8n

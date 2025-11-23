@@ -8,13 +8,24 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { Plus, FileText, Clock, Sparkles } from 'lucide-react';
+import { Plus, FileText, Clock, Sparkles, Brain, RefreshCw } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 
 interface Note {
   id: string;
   content: string;
   created_at: string;
+}
+
+interface SummaryResponse {
+  summary: string;
+  updatedAt?: string;
+}
+
+interface SummaryErrorResponse {
+  error: string;
+  rateLimited?: boolean;
+  hoursRemaining?: number;
 }
 
 export default function NotesPage() {
@@ -24,6 +35,9 @@ export default function NotesPage() {
   const [content, setContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -104,6 +118,51 @@ export default function NotesPage() {
     };
   }, []);
 
+  const fetchSummary = async () => {
+    if (!session) {
+      setSummaryError('Please log in to generate a summary.');
+      return;
+    }
+
+    setSummaryLoading(true);
+    setSummaryError(null);
+
+    try {
+      // Get the access token from the current session
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      
+      if (!currentSession?.access_token) {
+        throw new Error('No active session. Please log in again.');
+      }
+
+      const response = await fetch('/api/notes/summary', {
+        headers: {
+          'Authorization': `Bearer ${currentSession.access_token}`,
+        },
+      });
+      
+      if (!response.ok) {
+        const errorData: SummaryErrorResponse = await response.json().catch(() => ({ error: 'Unknown error' }));
+        
+        // Handle rate limiting with specific message
+        if (errorData.rateLimited && errorData.hoursRemaining) {
+          throw new Error(`You've already generated a summary today. Please try again in ${errorData.hoursRemaining} hour${errorData.hoursRemaining !== 1 ? 's' : ''}.`);
+        }
+        
+        throw new Error(errorData.error || `HTTP ${response.status}`);
+      }
+
+      const data: SummaryResponse = await response.json();
+      setSummary(data.summary);
+      setSummaryError(null);
+    } catch (err) {
+      console.error('Fetch summary error:', err);
+      setSummaryError(err instanceof Error ? err.message : 'Failed to generate summary. Please try again.');
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim() || content.length > 280) return;
@@ -134,6 +193,8 @@ export default function NotesPage() {
           setError(fetchError.message);
         } else {
           setNotes(data || []);
+          // Optionally trigger summary refresh in background
+          // fetchSummary();
         }
       }
     } catch (err) {
@@ -181,6 +242,76 @@ export default function NotesPage() {
           {notes.length} {notes.length === 1 ? 'note' : 'notes'}
         </Badge>
       </div>
+
+      {/* Notes Summary Card */}
+      <Card className="border-0 shadow-lg bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-950 dark:to-pink-950">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 text-white">
+                <Brain className="h-5 w-5" />
+              </div>
+              <div>
+                <CardTitle>Notes Summary</CardTitle>
+                <CardDescription>AI-generated summary of your saved notes</CardDescription>
+              </div>
+            </div>
+            <Button
+              onClick={fetchSummary}
+              disabled={summaryLoading}
+              variant="outline"
+              className="hover:bg-gradient-to-r hover:from-purple-500 hover:to-pink-500 hover:text-white hover:border-transparent transition-all"
+            >
+              {summaryLoading ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  Generating...
+                </>
+              ) : summary ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh Summary
+                </>
+              ) : (
+                <>
+                  <Brain className="h-4 w-4 mr-2" />
+                  Generate Summary
+                </>
+              )}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {summaryLoading && !summary ? (
+            <div className="py-8 text-center">
+              <RefreshCw className="h-8 w-8 mx-auto mb-2 animate-spin text-purple-500" />
+              <p className="text-sm text-gray-500">Generating summary...</p>
+            </div>
+          ) : summaryError ? (
+            <Alert className="border-red-500 bg-red-50 dark:bg-red-950">
+              <AlertDescription className="text-red-700 dark:text-red-300">
+                {summaryError}
+              </AlertDescription>
+            </Alert>
+          ) : summary ? (
+            <div className="space-y-2">
+              <p className="text-gray-800 dark:text-gray-200 leading-relaxed whitespace-pre-wrap">
+                {summary}
+              </p>
+            </div>
+          ) : (
+            <div className="py-8 text-center">
+              <Brain className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+              <p className="text-gray-600 dark:text-gray-400 mb-2">
+                No summary yet. Click the button to generate.
+              </p>
+              <p className="text-sm text-gray-500">
+                The summary is created by analyzing all your notes using AI.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-950 dark:to-purple-950">
         <CardHeader>
