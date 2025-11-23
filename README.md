@@ -29,7 +29,7 @@ The notes page allows you to create, manage, and view your personal notes. The A
 - **🔒 Row-Level Security**: Database-level security ensuring users can only access their own data
 - **🎨 Modern UI**: Beautiful, responsive interface built with shadcn/ui and Tailwind CSS
 - **📊 Dashboard**: Overview dashboard with real-time statistics
-- **⚡ Rate Limiting**: Prevents abuse with 1 summary generation per day per user
+- **⚡ Rate Limiting**: Prevents abuse with configurable daily limit (default: 2 summaries per day)
 
 ## 🏗️ Architecture
 
@@ -82,7 +82,7 @@ The notes page allows you to create, manage, and view your personal notes. The A
 - **Row-Level Security (RLS)**: Database policies ensure users can only access their own notes
 - **Server-Side Authentication**: API routes validate user sessions before processing requests
 - **Environment Variables**: Sensitive credentials stored securely, never exposed to client
-- **Rate Limiting**: Prevents abuse of AI summarization service (1 per day per user)
+- **Rate Limiting**: Prevents abuse of AI summarization service with daily generation limits (default: 2 per day)
 - **Basic Auth**: Secure webhook communication with n8n using Basic Authentication
 
 ## 🚀 Getting Started
@@ -92,7 +92,7 @@ The notes page allows you to create, manage, and view your personal notes. The A
 - Node.js 20.x or higher
 - npm or yarn
 - Supabase account and project
-- n8n instance (optional, for AI summarization feature)
+- n8n instance (for AI summarization feature)
 
 ### Installation
 
@@ -119,12 +119,12 @@ The notes page allows you to create, manage, and view your personal notes. The A
    NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
    SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
-   # n8n Webhook Configuration (optional, for AI summarization)
+   # n8n Webhook Configuration (required for AI summarization)
    N8N_NOTES_WEBHOOK_URL=https://your-n8n-instance.com/webhook/notes-summary
    N8N_NOTES_WEBHOOK_USER=your-webhook-username
    N8N_NOTES_WEBHOOK_PASS=your-webhook-password
 
-   # Optional
+   # App Configuration
    NEXT_PUBLIC_APP_NAME=Metagapura Portal
    ```
 
@@ -236,7 +236,7 @@ The portal integrates with n8n workflows for AI-powered note summarization. The 
 3. Processes notes through an LLM (configured in n8n)
 4. Returns a plain text summary
 
-**Rate Limiting**: To prevent abuse, users can generate one summary per 24 hours. The system tracks the last generation time and enforces this limit at the API level.
+**Rate Limiting**: To prevent abuse, users can generate a maximum number of summaries per day (default: 2). The system tracks daily generation counts and automatically resets the count each day. The limit can be adjusted in the database by modifying the `max_generations_per_day` field (admin only).
 
 ## 🛠️ Development
 
