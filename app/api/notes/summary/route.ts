@@ -40,33 +40,38 @@ export async function GET(request: NextRequest): Promise<NextResponse<SummaryRes
     const userId = serverSession.user.id;
     console.log('API /notes/summary: Generating summary for user:', userId);
 
-    // Check rate limit: 1 summary per day per user
-    try {
-      const supabaseForCheck = createClient(supabaseUrl, supabaseAnonKey, {
-        auth: {
-          persistSession: false,
+    // Create Supabase client for database operations
+    const supabaseForDB = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+      },
+      global: {
+        headers: {
+          Authorization: `Bearer ${serverSession.session.access_token}`,
         },
-        global: {
-          headers: {
-            Authorization: `Bearer ${serverSession.session.access_token}`,
-          },
-        },
-      });
+      },
+    });
 
-      const { data: existingSummary, error: checkError } = await supabaseForCheck
+    // Check rate limit using database fields
+    try {
+      const { data: existingSummary, error: checkError } = await supabaseForDB
         .schema('test')
         .from('note_summaries')
-        .select('updated_at')
+        .select('last_generated_at, rate_limit_hours')
         .eq('user_id', userId)
         .single();
 
-      if (!checkError && existingSummary?.updated_at) {
-        const lastUpdated = new Date(existingSummary.updated_at);
+      if (!checkError && existingSummary?.last_generated_at) {
+        const lastGenerated = new Date(existingSummary.last_generated_at);
         const now = new Date();
-        const hoursSinceUpdate = (now.getTime() - lastUpdated.getTime()) / (1000 * 60 * 60);
+        const hoursSinceLastGeneration = (now.getTime() - lastGenerated.getTime()) / (1000 * 60 * 60);
         
-        if (hoursSinceUpdate < 24) {
-          const hoursRemaining = Math.ceil(24 - hoursSinceUpdate);
+        // Use rate_limit_hours from database (default 24 if not set)
+        const rateLimitHours = existingSummary.rate_limit_hours || 24;
+        
+        if (hoursSinceLastGeneration < rateLimitHours) {
+          const hoursRemaining = Math.ceil(rateLimitHours - hoursSinceLastGeneration);
+          console.log(`Rate limit exceeded for user ${userId}. Hours remaining: ${hoursRemaining}`);
           return NextResponse.json(
             { 
               error: `Rate limit exceeded. You can generate a new summary in ${hoursRemaining} hour${hoursRemaining !== 1 ? 's' : ''}.`,
@@ -78,7 +83,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<SummaryRes
         }
       }
     } catch (rateLimitError) {
-      // If rate limit check fails, continue anyway (don't block the request)
+      // If rate limit check fails, log but continue (don't block the request)
       console.warn('Rate limit check failed, continuing:', rateLimitError);
     }
 
@@ -132,28 +137,33 @@ export async function GET(request: NextRequest): Promise<NextResponse<SummaryRes
       );
     }
 
-    // Optional: Store summary in Supabase
+    // Store summary in Supabase with rate limiting fields
     let updatedAt: string | undefined;
     try {
-      const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-        auth: {
-          persistSession: false,
-        },
-        global: {
-          headers: {
-            Authorization: `Bearer ${serverSession.session.access_token}`,
-          },
-        },
-      });
+      const now = new Date().toISOString();
+      
+      // First, try to get existing record to preserve rate_limit_hours if it was customized
+      const { data: existingRecord } = await supabaseForDB
+        .schema('test')
+        .from('note_summaries')
+        .select('rate_limit_hours, generation_count')
+        .eq('user_id', userId)
+        .single();
 
-      // Upsert summary to test.note_summaries table
-      const { data, error: upsertError } = await supabase
+      const rateLimitHours = existingRecord?.rate_limit_hours || 24;
+      const currentGenerationCount = existingRecord?.generation_count || 0;
+
+      // Upsert summary to test.note_summaries table with all rate limiting fields
+      const { data, error: upsertError } = await supabaseForDB
         .schema('test')
         .from('note_summaries')
         .upsert({
           user_id: userId,
           summary: summary.trim(),
-          updated_at: new Date().toISOString(),
+          updated_at: now,
+          last_generated_at: now,
+          generation_count: currentGenerationCount + 1,
+          rate_limit_hours: rateLimitHours, // Preserve existing or use default
         }, {
           onConflict: 'user_id',
         })
@@ -162,6 +172,9 @@ export async function GET(request: NextRequest): Promise<NextResponse<SummaryRes
 
       if (!upsertError && data) {
         updatedAt = data.updated_at;
+        console.log(`Summary stored successfully for user ${userId}. Generation count: ${currentGenerationCount + 1}`);
+      } else if (upsertError) {
+        console.error('Error storing summary:', upsertError);
       }
     } catch (storageError) {
       // Log but don't fail - summary storage is optional

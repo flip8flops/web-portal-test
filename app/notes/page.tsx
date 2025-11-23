@@ -78,6 +78,34 @@ export default function NotesPage() {
       }
     };
 
+    const fetchExistingSummary = async () => {
+      try {
+        const { data, error } = await supabase
+          .schema('test')
+          .from('note_summaries')
+          .select('summary')
+          .single();
+
+        if (error) {
+          // No summary exists yet, or error fetching - that's okay
+          if (error.code !== 'PGRST116') { // PGRST116 = no rows returned
+            console.warn('Error fetching summary:', error);
+          }
+          if (mounted) {
+            setSummary(null);
+          }
+        } else if (data?.summary) {
+          if (mounted) {
+            setSummary(data.summary);
+            setSummaryError(null);
+          }
+        }
+      } catch (err) {
+        console.warn('Error fetching existing summary:', err);
+        // Don't set error state - just leave summary as null
+      }
+    };
+
     // Try to get session, but don't wait for it
     supabase.auth.getSession()
       .then(({ data: { session } }) => {
@@ -87,6 +115,7 @@ export default function NotesPage() {
           clearTimeout(timeout);
           if (session) {
             fetchNotes();
+            fetchExistingSummary(); // Load existing summary from database
           }
         }
       })
@@ -105,8 +134,10 @@ export default function NotesPage() {
         setSession(session);
         if (session) {
           fetchNotes();
+          fetchExistingSummary(); // Load existing summary when auth state changes
         } else {
           setNotes([]);
+          setSummary(null); // Clear summary when logged out
         }
       }
     });
@@ -155,6 +186,7 @@ export default function NotesPage() {
       const data: SummaryResponse = await response.json();
       setSummary(data.summary);
       setSummaryError(null);
+      // Summary is now stored in database, so it will persist on refresh
     } catch (err) {
       console.error('Fetch summary error:', err);
       setSummaryError(err instanceof Error ? err.message : 'Failed to generate summary. Please try again.');

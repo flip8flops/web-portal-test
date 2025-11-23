@@ -7,11 +7,19 @@ A modern, secure web portal built with Next.js 14 that provides personal note-ta
 ![Supabase](https://img.shields.io/badge/Supabase-2.80-green?style=flat-square&logo=supabase)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind-4.1-38bdf8?style=flat-square&logo=tailwind-css)
 
-<img width="2400" height="1417" alt="image" src="https://github.com/user-attachments/assets/427fab2f-ff48-4d2b-a255-cd8f8ec41de6" />
+## 📸 Screenshots
 
-<img width="1871" height="1297" alt="image" src="https://github.com/user-attachments/assets/3bce0a3f-a69b-4787-8528-815513703778" />
+### Dashboard Overview
 
+The dashboard provides a comprehensive overview of your portal with real-time statistics and quick access to key features.
 
+<img width="2400" height="1417" alt="Dashboard Overview" src="https://github.com/user-attachments/assets/427fab2f-ff48-4d2b-a255-cd8f8ec41de6" />
+
+### Notes Management with AI Summarization
+
+The notes page allows you to create, manage, and view your personal notes. The AI-powered summary feature analyzes all your notes and generates intelligent insights.
+
+<img width="1871" height="1297" alt="Notes Management with AI Summarization" src="https://github.com/user-attachments/assets/3bce0a3f-a69b-4787-8528-815513703778" />
 
 ## 🌟 Features
 
@@ -159,13 +167,16 @@ A modern, secure web portal built with Next.js 14 that provides personal note-ta
        EXECUTE FUNCTION test.set_user_id();
      ```
 
-   - (Optional) Create `note_summaries` table for AI summaries:
+   - (Optional) Create `note_summaries` table for AI summaries with rate limiting:
      ```sql
      CREATE TABLE test.note_summaries (
        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
        user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
        summary TEXT NOT NULL,
        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       last_generated_at TIMESTAMPTZ,
+       generation_count INTEGER DEFAULT 0,
+       rate_limit_hours INTEGER DEFAULT 24,
        UNIQUE(user_id)
      );
 
@@ -183,6 +194,8 @@ A modern, secure web portal built with Next.js 14 that provides personal note-ta
        ON test.note_summaries FOR UPDATE
        USING (auth.uid() = user_id);
      ```
+
+     **Note**: The `rate_limit_hours` field (default 24) can be adjusted in the database to change the rate limit for testing or per-user customization.
 
    - Configure redirect URLs in Supabase Dashboard:
      - Go to **Authentication > URL Configuration**
