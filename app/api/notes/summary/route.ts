@@ -220,14 +220,22 @@ export async function GET(request: NextRequest): Promise<NextResponse<SummaryRes
 
       if (upsertError) {
         console.error('Error storing summary in database:', upsertError);
+        console.error('Error code:', upsertError.code);
+        console.error('Error message:', upsertError.message);
         console.error('Error details:', JSON.stringify(upsertError, null, 2));
-        // Don't fail the request, but log the error clearly
-        // The summary was generated successfully, storage failure is secondary
+        // Return error - storage is required for the feature to work
+        return NextResponse.json(
+          { 
+            error: `Failed to save summary: ${upsertError.message || 'Database error'}. Please check your database permissions.`,
+          },
+          { status: 500 }
+        );
       } else if (data) {
         updatedAt = data.updated_at;
         console.log(`Summary stored successfully for user ${userId}. Generation count: ${newGenerationCount}/${maxGenerationsPerDay}`);
       } else {
         console.warn('Summary upsert returned no data and no error');
+        // This shouldn't happen, but if it does, still return the summary
       }
     } catch (storageError) {
       // Log storage errors but don't fail the request

@@ -130,8 +130,17 @@ The notes page allows you to create, manage, and view your personal notes. The A
 
 4. **Configure Supabase**
 
-   - Create a schema named `test` in your Supabase project
-   - Create a `notes` table with RLS enabled:
+   Run the following SQL in your Supabase SQL Editor:
+
+   - Create schema and grant permissions:
+     ```sql
+     CREATE SCHEMA IF NOT EXISTS test;
+     
+     GRANT USAGE ON SCHEMA test TO authenticated;
+     GRANT USAGE ON SCHEMA test TO anon;
+     ```
+
+   - Create `notes` table with RLS enabled:
      ```sql
      CREATE TABLE test.notes (
        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -196,14 +205,6 @@ The notes page allows you to create, manage, and view your personal notes. The A
        ON test.note_summaries FOR UPDATE
        USING (auth.uid() = user_id);
      ```
-
-     **Important**: After creating the table, verify RLS is enabled by running:
-     ```sql
-     SELECT tablename, rowsecurity 
-     FROM pg_tables 
-     WHERE schemaname = 'test' AND tablename = 'note_summaries';
-     ```
-     The `rowsecurity` column should show `true`. If it shows `false`, run `ALTER TABLE test.note_summaries ENABLE ROW LEVEL SECURITY;` again.
 
      **Note**: The `max_generations_per_day` field (default 2) can be adjusted in the database to change the daily limit for testing. Only you (the admin) should modify this value.
 
