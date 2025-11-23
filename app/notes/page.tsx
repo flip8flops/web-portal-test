@@ -192,12 +192,16 @@ export default function NotesPage() {
       if (!response.ok) {
         const errorData: SummaryErrorResponse = await response.json().catch(() => ({ error: 'Unknown error' }));
         
-        // Handle rate limiting with specific message
+        // Handle rate limiting - show error but don't clear existing summary
         if (errorData.dailyLimitReached && errorData.generationsUsed && errorData.maxGenerations) {
-          throw new Error(errorData.error || `Daily limit reached (${errorData.generationsUsed}/${errorData.maxGenerations}). Please try again tomorrow.`);
+          setSummaryError(errorData.error || `Daily limit reached (${errorData.generationsUsed}/${errorData.maxGenerations}). Please try again tomorrow.`);
+          // Don't clear summary - keep the last one visible
+          return;
         }
         
-        throw new Error(errorData.error || `HTTP ${response.status}`);
+        setSummaryError(errorData.error || `HTTP ${response.status}`);
+        // For other errors, also keep existing summary if available
+        return;
       }
 
       const data: SummaryResponse = await response.json();
@@ -337,19 +341,30 @@ export default function NotesPage() {
               <RefreshCw className="h-8 w-8 mx-auto mb-2 animate-spin text-purple-500" />
               <p className="text-sm text-gray-500">Generating summary...</p>
             </div>
-          ) : summaryError ? (
-            <Alert className="border-red-500 bg-red-50 dark:bg-red-950">
-              <AlertDescription className="text-red-700 dark:text-red-300">
-                {summaryError}
-              </AlertDescription>
-            </Alert>
-          ) : summary ? (
-            <div className="space-y-2">
-              <p className="text-gray-800 dark:text-gray-200 leading-relaxed whitespace-pre-wrap">
-                {summary}
-              </p>
-            </div>
           ) : (
+            <div className="space-y-4">
+              {/* Show error message if present, but keep summary visible */}
+              {summaryError && (
+                <Alert className="border-orange-500 bg-orange-50 dark:bg-orange-950">
+                  <AlertDescription className="text-orange-700 dark:text-orange-300">
+                    {summaryError}
+                  </AlertDescription>
+                </Alert>
+              )}
+              
+              {/* Show summary if available */}
+              {summary ? (
+                <div className="space-y-2">
+                  <p className="text-gray-800 dark:text-gray-200 leading-relaxed whitespace-pre-wrap">
+                    {summary}
+                  </p>
+                  {summaryError && (
+                    <p className="text-xs text-gray-500 italic mt-2">
+                      This is your last generated summary. Generate a new one tomorrow.
+                    </p>
+                  )}
+                </div>
+              ) : !summaryError ? (
             <div className="py-8 text-center">
               <Brain className="h-12 w-12 mx-auto mb-4 text-gray-400" />
               {notes.length === 0 ? (
