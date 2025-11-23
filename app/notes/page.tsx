@@ -364,27 +364,32 @@ export default function NotesPage() {
                     </p>
                   )}
                 </div>
-              ) : !summaryError ? (
-            <div className="py-8 text-center">
-              <Brain className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-              {notes.length === 0 ? (
-                <>
-                  <p className="text-gray-600 dark:text-gray-400 mb-2">
-                    Create at least one note to generate a summary.
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    Once you have notes, you can generate an AI-powered summary.
-                  </p>
-                </>
               ) : (
-                <>
-                  <p className="text-gray-600 dark:text-gray-400 mb-2">
-                    No summary yet. Click the button to generate.
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    The summary is created by analyzing all your notes using AI.
-                  </p>
-                </>
+                /* Show empty state only if no summary and no error */
+                !summaryError && (
+                  <div className="py-8 text-center">
+                    <Brain className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                    {notes.length === 0 ? (
+                      <>
+                        <p className="text-gray-600 dark:text-gray-400 mb-2">
+                          Create at least one note to generate a summary.
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          Once you have notes, you can generate an AI-powered summary.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-gray-600 dark:text-gray-400 mb-2">
+                          No summary yet. Click the button to generate.
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          The summary is created by analyzing all your notes using AI.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )
               )}
             </div>
           )}
