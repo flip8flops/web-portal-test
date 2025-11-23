@@ -8,6 +8,9 @@ const appName = process.env.NEXT_PUBLIC_APP_NAME || 'Metagapura Portal';
 export const metadata: Metadata = {
   title: appName,
   description: 'Minimal Metagapura Portal',
+  icons: {
+    icon: '/icon.svg',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

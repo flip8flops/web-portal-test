@@ -13,7 +13,9 @@ interface SummaryResponse {
 interface ErrorResponse {
   error: string;
   rateLimited?: boolean;
-  hoursRemaining?: number;
+  dailyLimitReached?: boolean;
+  generationsUsed?: number;
+  maxGenerations?: number;
 }
 
 /**
@@ -52,31 +54,57 @@ export async function GET(request: NextRequest): Promise<NextResponse<SummaryRes
       },
     });
 
-    // Check rate limit using database fields
+    // Check if user has any notes first
+    const { data: userNotes, error: notesError } = await supabaseForDB
+      .schema('test')
+      .from('notes')
+      .select('id')
+      .limit(1);
+
+    if (notesError || !userNotes || userNotes.length === 0) {
+      return NextResponse.json(
+        { error: 'Please create at least one note before generating a summary.' },
+        { status: 400 }
+      );
+    }
+
+    // Check rate limit using per-day maximum logic
     try {
       const { data: existingSummary, error: checkError } = await supabaseForDB
         .schema('test')
         .from('note_summaries')
-        .select('last_generated_at, rate_limit_hours')
+        .select('last_generated_at, generation_count, max_generations_per_day')
         .eq('user_id', userId)
         .single();
 
-      if (!checkError && existingSummary?.last_generated_at) {
-        const lastGenerated = new Date(existingSummary.last_generated_at);
+      if (!checkError && existingSummary) {
+        const maxGenerationsPerDay = existingSummary.max_generations_per_day || 2;
+        let generationCount = existingSummary.generation_count || 0;
         const now = new Date();
-        const hoursSinceLastGeneration = (now.getTime() - lastGenerated.getTime()) / (1000 * 60 * 60);
         
-        // Use rate_limit_hours from database (default 24 if not set)
-        const rateLimitHours = existingSummary.rate_limit_hours || 24;
+        // Check if last_generated_at is from today or a different day
+        if (existingSummary.last_generated_at) {
+          const lastGenerated = new Date(existingSummary.last_generated_at);
+          const lastGeneratedDate = new Date(lastGenerated.getFullYear(), lastGenerated.getMonth(), lastGenerated.getDate());
+          const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          
+          // If different day, reset generation count
+          if (lastGeneratedDate.getTime() !== todayDate.getTime()) {
+            generationCount = 0;
+            console.log(`New day detected for user ${userId}. Resetting generation count.`);
+          }
+        }
         
-        if (hoursSinceLastGeneration < rateLimitHours) {
-          const hoursRemaining = Math.ceil(rateLimitHours - hoursSinceLastGeneration);
-          console.log(`Rate limit exceeded for user ${userId}. Hours remaining: ${hoursRemaining}`);
+        // Check if daily limit reached
+        if (generationCount >= maxGenerationsPerDay) {
+          console.log(`Daily limit reached for user ${userId}. Generations: ${generationCount}/${maxGenerationsPerDay}`);
           return NextResponse.json(
             { 
-              error: `Rate limit exceeded. You can generate a new summary in ${hoursRemaining} hour${hoursRemaining !== 1 ? 's' : ''}.`,
+              error: `Daily limit reached. You have used ${generationCount} of ${maxGenerationsPerDay} summary generations today. Please try again tomorrow.`,
               rateLimited: true,
-              hoursRemaining,
+              dailyLimitReached: true,
+              generationsUsed: generationCount,
+              maxGenerations: maxGenerationsPerDay,
             },
             { status: 429 }
           );
@@ -142,16 +170,31 @@ export async function GET(request: NextRequest): Promise<NextResponse<SummaryRes
     try {
       const now = new Date().toISOString();
       
-      // First, try to get existing record to preserve rate_limit_hours if it was customized
+      // Get existing record to check if we need to reset generation_count for new day
       const { data: existingRecord } = await supabaseForDB
         .schema('test')
         .from('note_summaries')
-        .select('rate_limit_hours, generation_count')
+        .select('last_generated_at, generation_count, max_generations_per_day')
         .eq('user_id', userId)
         .single();
 
-      const rateLimitHours = existingRecord?.rate_limit_hours || 24;
-      const currentGenerationCount = existingRecord?.generation_count || 0;
+      let newGenerationCount = 1;
+      const maxGenerationsPerDay = existingRecord?.max_generations_per_day || 2;
+      
+      // Check if last generation was today or different day
+      if (existingRecord?.last_generated_at) {
+        const lastGenerated = new Date(existingRecord.last_generated_at);
+        const lastGeneratedDate = new Date(lastGenerated.getFullYear(), lastGenerated.getMonth(), lastGenerated.getDate());
+        const todayDate = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+        
+        if (lastGeneratedDate.getTime() === todayDate.getTime()) {
+          // Same day, increment count
+          newGenerationCount = (existingRecord.generation_count || 0) + 1;
+        } else {
+          // Different day, reset to 1
+          newGenerationCount = 1;
+        }
+      }
 
       // Upsert summary to test.note_summaries table with all rate limiting fields
       const { data, error: upsertError } = await supabaseForDB
@@ -162,8 +205,8 @@ export async function GET(request: NextRequest): Promise<NextResponse<SummaryRes
           summary: summary.trim(),
           updated_at: now,
           last_generated_at: now,
-          generation_count: currentGenerationCount + 1,
-          rate_limit_hours: rateLimitHours, // Preserve existing or use default
+          generation_count: newGenerationCount,
+          max_generations_per_day: maxGenerationsPerDay, // Preserve existing or use default
         }, {
           onConflict: 'user_id',
         })
@@ -172,7 +215,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<SummaryRes
 
       if (!upsertError && data) {
         updatedAt = data.updated_at;
-        console.log(`Summary stored successfully for user ${userId}. Generation count: ${currentGenerationCount + 1}`);
+        console.log(`Summary stored successfully for user ${userId}. Generation count: ${newGenerationCount}/${maxGenerationsPerDay}`);
       } else if (upsertError) {
         console.error('Error storing summary:', upsertError);
       }

@@ -25,7 +25,9 @@ interface SummaryResponse {
 interface SummaryErrorResponse {
   error: string;
   rateLimited?: boolean;
-  hoursRemaining?: number;
+  dailyLimitReached?: boolean;
+  generationsUsed?: number;
+  maxGenerations?: number;
 }
 
 export default function NotesPage() {
@@ -176,8 +178,8 @@ export default function NotesPage() {
         const errorData: SummaryErrorResponse = await response.json().catch(() => ({ error: 'Unknown error' }));
         
         // Handle rate limiting with specific message
-        if (errorData.rateLimited && errorData.hoursRemaining) {
-          throw new Error(`You've already generated a summary today. Please try again in ${errorData.hoursRemaining} hour${errorData.hoursRemaining !== 1 ? 's' : ''}.`);
+        if (errorData.dailyLimitReached && errorData.generationsUsed && errorData.maxGenerations) {
+          throw new Error(errorData.error || `Daily limit reached (${errorData.generationsUsed}/${errorData.maxGenerations}). Please try again tomorrow.`);
         }
         
         throw new Error(errorData.error || `HTTP ${response.status}`);
@@ -290,9 +292,10 @@ export default function NotesPage() {
             </div>
             <Button
               onClick={fetchSummary}
-              disabled={summaryLoading}
+              disabled={summaryLoading || notes.length === 0}
               variant="outline"
               className="hover:bg-gradient-to-r hover:from-purple-500 hover:to-pink-500 hover:text-white hover:border-transparent transition-all"
+              title={notes.length === 0 ? 'Create at least one note to generate a summary' : ''}
             >
               {summaryLoading ? (
                 <>
@@ -334,12 +337,25 @@ export default function NotesPage() {
           ) : (
             <div className="py-8 text-center">
               <Brain className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-              <p className="text-gray-600 dark:text-gray-400 mb-2">
-                No summary yet. Click the button to generate.
-              </p>
-              <p className="text-sm text-gray-500">
-                The summary is created by analyzing all your notes using AI.
-              </p>
+              {notes.length === 0 ? (
+                <>
+                  <p className="text-gray-600 dark:text-gray-400 mb-2">
+                    Create at least one note to generate a summary.
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    Once you have notes, you can generate an AI-powered summary.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-gray-600 dark:text-gray-400 mb-2">
+                    No summary yet. Click the button to generate.
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    The summary is created by analyzing all your notes using AI.
+                  </p>
+                </>
+              )}
             </div>
           )}
         </CardContent>

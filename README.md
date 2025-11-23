@@ -167,7 +167,7 @@ The notes page allows you to create, manage, and view your personal notes. The A
        EXECUTE FUNCTION test.set_user_id();
      ```
 
-   - (Optional) Create `note_summaries` table for AI summaries with rate limiting:
+   - Create `note_summaries` table for AI summaries with rate limiting:
      ```sql
      CREATE TABLE test.note_summaries (
        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -176,7 +176,7 @@ The notes page allows you to create, manage, and view your personal notes. The A
        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
        last_generated_at TIMESTAMPTZ,
        generation_count INTEGER DEFAULT 0,
-       rate_limit_hours INTEGER DEFAULT 24,
+       max_generations_per_day INTEGER DEFAULT 2,
        UNIQUE(user_id)
      );
 
@@ -195,7 +195,7 @@ The notes page allows you to create, manage, and view your personal notes. The A
        USING (auth.uid() = user_id);
      ```
 
-     **Note**: The `rate_limit_hours` field (default 24) can be adjusted in the database to change the rate limit for testing or per-user customization.
+     **Note**: The `max_generations_per_day` field (default 2) can be adjusted in the database to change the daily limit for testing. Only you (the admin) should modify this value.
 
    - Configure redirect URLs in Supabase Dashboard:
      - Go to **Authentication > URL Configuration**
