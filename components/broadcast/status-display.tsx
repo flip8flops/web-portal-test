@@ -63,9 +63,10 @@ export function StatusDisplay({ campaignId, executionId }: StatusDisplayProps) {
     // Initial fetch
     const fetchStatuses = async () => {
       try {
-        // Use public schema view instead of direct schema access
-        // Supabase PostgREST only allows queries to public, graphql_public, or test schemas
+        // Query directly to citia_mora_datamart schema
+        // Schema must be exposed in Supabase Data API settings
         let query = supabase
+          .schema('citia_mora_datamart')
           .from('campaign_status_updates')
           .select('agent_name, status, message, progress, updated_at, campaign_id, execution_id');
 
