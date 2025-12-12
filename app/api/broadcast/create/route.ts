@@ -85,6 +85,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<CreateRes
     });
 
     console.log('API /broadcast/create: n8n webhook response status:', response.status);
+    console.log('API /broadcast/create: n8n webhook response headers:', Object.fromEntries(response.headers.entries()));
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Unknown error');

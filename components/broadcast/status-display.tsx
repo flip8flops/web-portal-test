@@ -62,7 +62,7 @@ export function StatusDisplay({ campaignId, executionId }: StatusDisplayProps) {
         let query = supabase
           .schema('citia_mora_datamart')
           .from('campaign_status_updates')
-          .select('agent_name, status, message, progress, updated_at');
+          .select('agent_name, status, message, progress, updated_at, campaign_id, execution_id');
 
         // Query by campaign_id if available and not 'pending'
         if (campaignId && campaignId !== 'pending') {
@@ -71,22 +71,37 @@ export function StatusDisplay({ campaignId, executionId }: StatusDisplayProps) {
         // Fallback to execution_id
         else if (executionId) {
           query = query.eq('execution_id', executionId);
-        } else {
-          setLoading(false);
-          return;
+        } 
+        // If no ID yet, query recent updates (last 5 minutes) and filter client-side
+        else {
+          // Query recent updates (last 5 minutes) as fallback
+          const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+          query = query.gte('created_at', fiveMinutesAgo).limit(50);
         }
 
         const { data, error } = await query.order('created_at', { ascending: false });
 
         if (error) {
           console.error('Error fetching statuses:', error);
+          setLoading(false);
           return;
         }
+
+        console.log('Fetched statuses:', data?.length, 'records');
 
         // Get latest status per agent
         const latestStatuses: Record<string, StatusUpdate> = {};
         if (data) {
-          data.forEach((update) => {
+          data.forEach((update: any) => {
+            // If we have executionId, filter by it
+            if (executionId && update.execution_id !== executionId) {
+              return;
+            }
+            // If we have campaignId, filter by it
+            if (campaignId && campaignId !== 'pending' && update.campaign_id !== campaignId) {
+              return;
+            }
+            
             if (!latestStatuses[update.agent_name] || 
                 new Date(update.updated_at) > new Date(latestStatuses[update.agent_name].updated_at)) {
               latestStatuses[update.agent_name] = update as StatusUpdate;
@@ -94,46 +109,92 @@ export function StatusDisplay({ campaignId, executionId }: StatusDisplayProps) {
           });
         }
         setStatuses(latestStatuses);
+        setLoading(false);
       } catch (err) {
         console.error('Error in fetchStatuses:', err);
-      } finally {
         setLoading(false);
       }
     };
 
+    // Fetch immediately
     fetchStatuses();
 
-    // Subscribe to real-time updates
-    const channelName = `campaign_status:${campaignId || executionId}`;
-    const filter = campaignId && campaignId !== 'pending'
-      ? `campaign_id=eq.${campaignId}`
-      : `execution_id=eq.${executionId}`;
+    // Set up polling as fallback (every 2 seconds for first 30 seconds, then every 5 seconds)
+    let pollCount = 0;
+    const pollInterval = setInterval(() => {
+      pollCount++;
+      fetchStatuses();
+      // After 15 polls (30 seconds), reduce frequency to every 5 seconds
+      if (pollCount >= 15) {
+        clearInterval(pollInterval);
+        const slowPollInterval = setInterval(() => {
+          fetchStatuses();
+        }, 5000);
+        // Clear slow polling after 5 minutes total
+        setTimeout(() => {
+          clearInterval(slowPollInterval);
+        }, 5 * 60 * 1000);
+      }
+    }, 2000);
 
-    const channel = supabase
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'citia_mora_datamart',
-          table: 'campaign_status_updates',
-          filter: filter,
-        },
-        (payload) => {
-          console.log('Real-time update:', payload);
-          if (payload.new) {
-            const update = payload.new as StatusUpdate;
-            setStatuses((prev) => ({
-              ...prev,
-              [update.agent_name]: update,
-            }));
+    // Subscribe to real-time updates
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    
+    try {
+      const channelName = `campaign_status:${campaignId || executionId || 'unknown'}`;
+      let filter: string;
+      
+      if (campaignId && campaignId !== 'pending') {
+        filter = `campaign_id=eq.${campaignId}`;
+      } else if (executionId) {
+        filter = `execution_id=eq.${executionId}`;
+      } else {
+        // No filter available, rely on polling only
+        console.log('No filter available, using polling only');
+        return;
+      }
+
+      console.log('Setting up real-time subscription:', { channelName, filter });
+
+      channel = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'citia_mora_datamart',
+            table: 'campaign_status_updates',
+            filter: filter,
+          },
+          (payload) => {
+            console.log('Real-time update received:', payload);
+            if (payload.new) {
+              const update = payload.new as StatusUpdate;
+              console.log('Updating status for agent:', update.agent_name, update);
+              setStatuses((prev) => ({
+                ...prev,
+                [update.agent_name]: update,
+              }));
+            }
           }
-        }
-      )
-      .subscribe();
+        )
+        .subscribe((status) => {
+          console.log('Subscription status:', status);
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Real-time subscription active');
+          } else if (status === 'CHANNEL_ERROR') {
+            console.error('❌ Real-time subscription error');
+          }
+        });
+    } catch (err) {
+      console.error('Error setting up real-time subscription:', err);
+    }
 
     return () => {
-      supabase.removeChannel(channel);
+      clearInterval(pollInterval);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
   }, [campaignId, executionId]);
 
