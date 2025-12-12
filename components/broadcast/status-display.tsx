@@ -16,6 +16,7 @@ interface StatusUpdate {
 
 interface StatusDisplayProps {
   campaignId: string | null;
+  executionId?: string | null;
 }
 
 const agentLabels: Record<string, string> = {
@@ -40,12 +41,15 @@ const statusColors: Record<string, string> = {
   rejected: 'text-orange-600',
 };
 
-export function StatusDisplay({ campaignId }: StatusDisplayProps) {
+export function StatusDisplay({ campaignId, executionId }: StatusDisplayProps) {
   const [statuses, setStatuses] = useState<Record<string, StatusUpdate>>({});
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!campaignId) {
+    // Need either campaignId (not 'pending') or executionId
+    const hasValidId = (campaignId && campaignId !== 'pending') || executionId;
+    
+    if (!hasValidId) {
       setStatuses({});
       return;
     }
@@ -55,12 +59,24 @@ export function StatusDisplay({ campaignId }: StatusDisplayProps) {
     // Initial fetch
     const fetchStatuses = async () => {
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .schema('citia_mora_datamart')
           .from('campaign_status_updates')
-          .select('agent_name, status, message, progress, updated_at')
-          .eq('campaign_id', campaignId)
-          .order('created_at', { ascending: false });
+          .select('agent_name, status, message, progress, updated_at');
+
+        // Query by campaign_id if available and not 'pending'
+        if (campaignId && campaignId !== 'pending') {
+          query = query.eq('campaign_id', campaignId);
+        } 
+        // Fallback to execution_id
+        else if (executionId) {
+          query = query.eq('execution_id', executionId);
+        } else {
+          setLoading(false);
+          return;
+        }
+
+        const { data, error } = await query.order('created_at', { ascending: false });
 
         if (error) {
           console.error('Error fetching statuses:', error);
@@ -88,15 +104,20 @@ export function StatusDisplay({ campaignId }: StatusDisplayProps) {
     fetchStatuses();
 
     // Subscribe to real-time updates
+    const channelName = `campaign_status:${campaignId || executionId}`;
+    const filter = campaignId && campaignId !== 'pending'
+      ? `campaign_id=eq.${campaignId}`
+      : `execution_id=eq.${executionId}`;
+
     const channel = supabase
-      .channel(`campaign_status:${campaignId}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'citia_mora_datamart',
           table: 'campaign_status_updates',
-          filter: `campaign_id=eq.${campaignId}`,
+          filter: filter,
         },
         (payload) => {
           console.log('Real-time update:', payload);
@@ -114,10 +135,11 @@ export function StatusDisplay({ campaignId }: StatusDisplayProps) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [campaignId]);
+  }, [campaignId, executionId]);
 
-  // Show empty state if no campaign ID
-  if (!campaignId) {
+  // Show empty state if no valid ID
+  const hasValidId = (campaignId && campaignId !== 'pending') || executionId;
+  if (!hasValidId) {
     return (
       <Card className="border-0 shadow-lg bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900">
         <CardContent className="p-6">
@@ -161,10 +183,23 @@ export function StatusDisplay({ campaignId }: StatusDisplayProps) {
     );
   }
 
+  // CSS for dot dot dot animation
+  const dotAnimation = `
+    @keyframes blink {
+      0%, 100% { opacity: 0.2; }
+      50% { opacity: 1; }
+    }
+    .animate-blink {
+      animation: blink 1.4s infinite;
+    }
+  `;
+
   return (
-    <Card className="border-0 shadow-lg bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900">
-      <CardContent className="p-6">
-        <div className="space-y-4">
+    <>
+      <style dangerouslySetInnerHTML={{ __html: dotAnimation }} />
+      <Card className="border-0 shadow-lg bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900">
+        <CardContent className="p-6">
+          <div className="space-y-4">
           {agents.map((agent) => {
             const status = statuses[agent];
             if (!status) return null;
@@ -189,10 +224,10 @@ export function StatusDisplay({ campaignId }: StatusDisplayProps) {
                   <p className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1">
                     <span>{status.message || 'Processing...'}</span>
                     {(status.status === 'thinking' || status.status === 'processing') && (
-                      <span className="inline-flex gap-1">
-                        <span className="animate-pulse">.</span>
-                        <span className="animate-pulse" style={{ animationDelay: '0.2s' }}>.</span>
-                        <span className="animate-pulse" style={{ animationDelay: '0.4s' }}>.</span>
+                      <span className="inline-flex gap-0.5 ml-1">
+                        <span className="animate-blink" style={{ animationDelay: '0s' }}>.</span>
+                        <span className="animate-blink" style={{ animationDelay: '0.2s' }}>.</span>
+                        <span className="animate-blink" style={{ animationDelay: '0.4s' }}>.</span>
                       </span>
                     )}
                   </p>
@@ -210,9 +245,10 @@ export function StatusDisplay({ campaignId }: StatusDisplayProps) {
               </div>
             );
           })}
-        </div>
-      </CardContent>
-    </Card>
+          </div>
+        </CardContent>
+      </Card>
+    </>
   );
 }
 

@@ -120,7 +120,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<CreateRes
     return NextResponse.json({
       campaign_id: campaignId,
       execution_id: executionId,
-      message: 'Campaign created successfully! The workflow is now processing.',
+      message: 'Campaign initiated! Agents are now processing.',
     });
   } catch (error) {
     console.error('Error creating campaign:', error);

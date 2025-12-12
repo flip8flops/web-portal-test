@@ -24,4 +24,11 @@ pnpm-debug.log*
 coverage/
 *.local
 
-node_modules
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Cache
+.cache/
+.turbo/

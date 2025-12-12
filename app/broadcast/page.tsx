@@ -31,6 +31,7 @@ export default function BroadcastPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [campaignId, setCampaignId] = useState<string | null>(null);
+  const [executionId, setExecutionId] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -89,6 +90,7 @@ export default function BroadcastPage() {
     setError(null);
     setSuccess(null);
     setCampaignId(null);
+    setExecutionId(null);
 
     try {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
@@ -121,7 +123,8 @@ export default function BroadcastPage() {
 
       const data: CreateResponse = await response.json();
       setCampaignId(data.campaign_id);
-      setSuccess(data.message || 'Campaign created successfully! Status updates will appear above.');
+      setExecutionId(data.execution_id || null);
+      setSuccess(data.message || 'Campaign initiated! Agents are now processing.');
       
       // Reset form (optional - bisa di-comment jika ingin keep data)
       // setNotes('');
@@ -159,15 +162,15 @@ export default function BroadcastPage() {
 
   return (
     <div className="space-y-8">
-      <div className="mb-6">
-        <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
+      <div className="mb-6 pb-2">
+        <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2 leading-tight">
           Broadcast Team Agent
         </h1>
         <p className="text-gray-600 text-lg">Create and manage broadcast campaigns</p>
       </div>
 
       {/* Status Display Area */}
-      <StatusDisplay campaignId={campaignId} />
+      <StatusDisplay campaignId={campaignId} executionId={executionId} />
 
       {/* Error/Success Messages */}
       {error && (
