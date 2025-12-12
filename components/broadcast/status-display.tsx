@@ -183,7 +183,7 @@ export function StatusDisplay({ campaignId, executionId }: StatusDisplayProps) {
           'postgres_changes',
           {
             event: '*',
-            schema: 'public',
+            schema: 'citia_mora_datamart',
             table: 'campaign_status_updates',
             filter: filter,
           },
