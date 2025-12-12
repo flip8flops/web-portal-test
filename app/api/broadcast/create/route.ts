@@ -116,11 +116,28 @@ export async function POST(request: NextRequest): Promise<NextResponse<CreateRes
     const campaignId = responseData.campaign_id || responseData.id || 'pending';
     const executionId = responseData.execution_id || responseData.executionId;
 
+    console.log('API /broadcast/create: Response data:', JSON.stringify(responseData, null, 2));
     console.log('API /broadcast/create: Campaign created:', campaignId);
+    console.log('API /broadcast/create: Execution ID:', executionId || 'NOT FOUND');
+
+    // If execution_id not in response, try to get from response headers or query database
+    let finalExecutionId = executionId;
+    if (!finalExecutionId) {
+      // Try to get from response headers (n8n might put it there)
+      const n8nExecutionId = response.headers.get('x-n8n-execution-id') || 
+                            response.headers.get('execution-id');
+      if (n8nExecutionId) {
+        finalExecutionId = n8nExecutionId;
+        console.log('API /broadcast/create: Found execution_id in headers:', finalExecutionId);
+      } else {
+        console.warn('API /broadcast/create: execution_id not found in response or headers');
+        console.warn('API /broadcast/create: Frontend will use polling only (no real-time subscription)');
+      }
+    }
 
     return NextResponse.json({
       campaign_id: campaignId,
-      execution_id: executionId,
+      execution_id: finalExecutionId || null,
       message: 'Campaign initiated! Agents are now processing.',
     });
   } catch (error) {

@@ -46,14 +46,18 @@ export function StatusDisplay({ campaignId, executionId }: StatusDisplayProps) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    console.log('StatusDisplay: useEffect triggered', { campaignId, executionId });
+    
     // Need either campaignId (not 'pending') or executionId
     const hasValidId = (campaignId && campaignId !== 'pending') || executionId;
     
     if (!hasValidId) {
+      console.log('StatusDisplay: No valid ID, clearing statuses');
       setStatuses({});
       return;
     }
 
+    console.log('StatusDisplay: Starting fetch with ID:', { campaignId, executionId });
     setLoading(true);
 
     // Initial fetch
@@ -82,12 +86,27 @@ export function StatusDisplay({ campaignId, executionId }: StatusDisplayProps) {
         const { data, error } = await query.order('created_at', { ascending: false });
 
         if (error) {
-          console.error('Error fetching statuses:', error);
+          console.error('StatusDisplay: Error fetching statuses:', error);
+          console.error('StatusDisplay: Error details:', JSON.stringify(error, null, 2));
           setLoading(false);
           return;
         }
 
-        console.log('Fetched statuses:', data?.length, 'records');
+        console.log('StatusDisplay: Fetched statuses:', data?.length || 0, 'records');
+        if (data && data.length > 0) {
+          console.log('StatusDisplay: Sample record:', {
+            agent_name: data[0].agent_name,
+            status: data[0].status,
+            message: data[0].message?.substring(0, 50),
+            execution_id: data[0].execution_id,
+            campaign_id: data[0].campaign_id,
+          });
+        } else {
+          console.warn('StatusDisplay: No records found. Check:');
+          console.warn('  - Is execution_id correct?', executionId);
+          console.warn('  - Is campaign_id correct?', campaignId);
+          console.warn('  - Are status updates being inserted in n8n workflow?');
+        }
 
         // Get latest status per agent
         const latestStatuses: Record<string, StatusUpdate> = {};
@@ -150,11 +169,11 @@ export function StatusDisplay({ campaignId, executionId }: StatusDisplayProps) {
         filter = `execution_id=eq.${executionId}`;
       } else {
         // No filter available, rely on polling only
-        console.log('No filter available, using polling only');
+        console.warn('StatusDisplay: No filter available (no campaign_id or execution_id), using polling only');
         return;
       }
 
-      console.log('Setting up real-time subscription:', { channelName, filter });
+      console.log('StatusDisplay: Setting up real-time subscription:', { channelName, filter });
 
       channel = supabase
         .channel(channelName)
@@ -167,10 +186,13 @@ export function StatusDisplay({ campaignId, executionId }: StatusDisplayProps) {
             filter: filter,
           },
           (payload) => {
-            console.log('Real-time update received:', payload);
+            console.log('StatusDisplay: Real-time update received:', payload);
             if (payload.new) {
               const update = payload.new as StatusUpdate;
-              console.log('Updating status for agent:', update.agent_name, update);
+              console.log('StatusDisplay: Updating status for agent:', update.agent_name, {
+                status: update.status,
+                message: update.message?.substring(0, 50) + '...',
+              });
               setStatuses((prev) => ({
                 ...prev,
                 [update.agent_name]: update,
@@ -178,12 +200,18 @@ export function StatusDisplay({ campaignId, executionId }: StatusDisplayProps) {
             }
           }
         )
-        .subscribe((status) => {
-          console.log('Subscription status:', status);
+        .subscribe((status, err) => {
+          console.log('StatusDisplay: Subscription status:', status);
           if (status === 'SUBSCRIBED') {
-            console.log('✅ Real-time subscription active');
+            console.log('✅ StatusDisplay: Real-time subscription active');
           } else if (status === 'CHANNEL_ERROR') {
-            console.error('❌ Real-time subscription error');
+            console.error('❌ StatusDisplay: Real-time subscription error:', err);
+            console.error('StatusDisplay: This usually means Realtime is not enabled for the table');
+            console.error('StatusDisplay: Check SUPABASE-REALTIME-SETUP.md for instructions');
+          } else if (status === 'TIMED_OUT') {
+            console.warn('⚠️ StatusDisplay: Real-time subscription timed out');
+          } else if (status === 'CLOSED') {
+            console.warn('⚠️ StatusDisplay: Real-time subscription closed');
           }
         });
     } catch (err) {
