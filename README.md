@@ -124,6 +124,11 @@ The notes page allows you to create, manage, and view your personal notes. The A
    N8N_NOTES_WEBHOOK_USER=your-webhook-username
    N8N_NOTES_WEBHOOK_PASS=your-webhook-password
 
+   # n8n Webhook Configuration (required for Broadcast Team Agent)
+   N8N_CITIA_CAMPAIGN_WEBHOOK_URL=https://your-n8n-instance.com/webhook/your-webhook-id
+   N8N_CITIA_CAMPAIGN_WEBHOOK_USER=your-webhook-username
+   N8N_CITIA_CAMPAIGN_WEBHOOK_PASS=your-webhook-password
+
    # App Configuration
    NEXT_PUBLIC_APP_NAME=Metagapura Portal
    ```

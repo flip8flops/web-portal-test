@@ -3,11 +3,12 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, FileText } from 'lucide-react';
+import { LayoutDashboard, FileText, Radio } from 'lucide-react';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/notes', label: 'Notes', icon: FileText },
+  { href: '/broadcast', label: 'Broadcast', icon: Radio },
 ];
 
 export function Sidebar() {
