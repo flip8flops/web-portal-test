@@ -16,17 +16,18 @@ export function ImageUpload({ onImageSelect, disabled }: ImageUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = useCallback((file: File) => {
-    // Validate file type
-    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    // Validate file type (only PNG and JPG)
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png'];
     if (!validTypes.includes(file.type)) {
-      alert('Invalid file type. Please upload a JPG, PNG, or WebP image.');
+      alert('Format file tidak didukung. Silakan upload gambar PNG atau JPG saja.');
       return;
     }
 
-    // Validate file size (max 5MB)
-    const maxSize = 5 * 1024 * 1024; // 5MB
+    // Validate file size (max 2MB)
+    const maxSize = 2 * 1024 * 1024; // 2MB
     if (file.size > maxSize) {
-      alert('File size too large. Please upload an image smaller than 5MB.');
+      const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+      alert(`Ukuran file terlalu besar (${fileSizeMB} MB). Maksimal 2 MB. Silakan kompres atau pilih gambar lain.`);
       return;
     }
 
@@ -133,7 +134,7 @@ export function ImageUpload({ onImageSelect, disabled }: ImageUploadProps) {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/jpeg,image/jpg,image/png,image/webp"
+              accept="image/jpeg,image/jpg,image/png"
               onChange={handleChange}
               disabled={disabled}
               className="hidden"
@@ -146,11 +147,8 @@ export function ImageUpload({ onImageSelect, disabled }: ImageUploadProps) {
                 <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
                   Click to upload or drag and drop
                 </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  upload/drag image then become image thumbnail
-                </p>
                 <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                  PNG, JPG, WebP up to 5MB
+                  PNG atau JPG, maksimal 2MB
                 </p>
               </div>
             </div>

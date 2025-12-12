@@ -186,8 +186,15 @@ export function StatusDisplay({ campaignId }: StatusDisplayProps) {
                       {status.status}
                     </Badge>
                   </div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    {status.message || 'Processing...'}
+                  <p className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1">
+                    <span>{status.message || 'Processing...'}</span>
+                    {(status.status === 'thinking' || status.status === 'processing') && (
+                      <span className="inline-flex gap-1">
+                        <span className="animate-pulse">.</span>
+                        <span className="animate-pulse" style={{ animationDelay: '0.2s' }}>.</span>
+                        <span className="animate-pulse" style={{ animationDelay: '0.4s' }}>.</span>
+                      </span>
+                    )}
                   </p>
                   {status.progress > 0 && status.progress < 100 && (
                     <div className="mt-2">

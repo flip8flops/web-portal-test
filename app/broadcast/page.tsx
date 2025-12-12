@@ -76,7 +76,7 @@ export default function BroadcastPage() {
     e.preventDefault();
 
     if (!notes.trim()) {
-      setError('Please enter campaign notes before generating.');
+      setError('Campaign notes wajib diisi sebelum generate.');
       return;
     }
 
@@ -159,11 +159,11 @@ export default function BroadcastPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+      <div className="mb-6">
+        <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
           Broadcast Team Agent
         </h1>
-        <p className="text-gray-600 mt-2 text-lg">Create and manage broadcast campaigns</p>
+        <p className="text-gray-600 text-lg">Create and manage broadcast campaigns</p>
       </div>
 
       {/* Status Display Area */}
