@@ -34,6 +34,8 @@
     "typescript": "^5.9.3"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.1.16"
+    "@tailwindcss/postcss": "^4.1.16",
+    "dotenv": "^17.2.3",
+    "pg": "^8.16.3"
   }
 }
