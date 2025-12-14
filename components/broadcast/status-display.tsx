@@ -47,7 +47,7 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
   const [statuses, setStatuses] = useState<Record<string, StatusUpdate>>({});
   const [loading, setLoading] = useState(false);
   // Use ref to track current IDs and prevent race conditions
-  const currentIdsRef = useRef<{ campaignId: string | null; executionId: string | null }>({
+  const currentIdsRef = useRef<{ campaignId: string | null; executionId: string | null | undefined }>({
     campaignId: null,
     executionId: null,
   });
@@ -204,10 +204,6 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
     // Fetch immediately
     fetchStatuses();
 
-    // Store current IDs to prevent polling with stale IDs
-    const currentCampaignId = campaignId;
-    const currentExecutionId = executionId;
-    
     // Set up polling as fallback (every 2 seconds for first 30 seconds, then every 5 seconds)
     let pollCount = 0;
     const pollInterval = setInterval(() => {
