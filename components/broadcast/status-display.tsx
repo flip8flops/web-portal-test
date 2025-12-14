@@ -326,6 +326,10 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
             const isCompleted = status.status === 'completed';
             const isProcessing = status.status === 'thinking' || status.status === 'processing';
             const isError = status.status === 'error';
+            const isRejected = status.status === 'rejected';
+            // Show message for processing, error, or final status (completed/rejected)
+            const shouldShowMessage = isProcessing || isError || isCompleted || isRejected;
+            const hasMessage = status.message && status.message.trim().length > 0;
 
             return (
               <div key={agent} className="flex items-start gap-3">
@@ -340,15 +344,19 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
                       {status.status}
                     </Badge>
                   </div>
-                  {/* Show message detail for processing OR error agents */}
-                  {(isProcessing || isError) && (
+                  {/* Show message detail for processing, error, or final status (completed/rejected) */}
+                  {shouldShowMessage && hasMessage && (
                     <>
                       <p className={`text-sm flex items-center gap-1 mt-1 ${
                         isError 
                           ? 'text-red-600 dark:text-red-400 font-semibold' 
+                          : isRejected
+                          ? 'text-orange-600 dark:text-orange-400'
+                          : isCompleted
+                          ? 'text-gray-600 dark:text-gray-400'
                           : 'text-gray-600 dark:text-gray-400'
                       }`}>
-                        <span>{status.message || (isError ? 'An error occurred' : 'Processing...')}</span>
+                        <span>{status.message}</span>
                         {isProcessing && (
                           <span className="inline-flex gap-1 ml-1 items-center">
                             <span className="dot-1 inline-block w-2.5 h-2.5 rounded-full bg-current opacity-30"></span>
@@ -368,6 +376,12 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
                         </div>
                       )}
                     </>
+                  )}
+                  {/* Show default message for error if no message provided */}
+                  {isError && !hasMessage && (
+                    <p className="text-sm text-red-600 dark:text-red-400 font-semibold mt-1">
+                      An error occurred
+                    </p>
                   )}
                 </div>
               </div>
