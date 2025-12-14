@@ -29,9 +29,9 @@ export default function BroadcastPage() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [campaignId, setCampaignId] = useState<string | null>(null);
   const [executionId, setExecutionId] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -88,7 +88,7 @@ export default function BroadcastPage() {
 
     setSubmitting(true);
     setError(null);
-    setSuccess(null);
+    setIsProcessing(false); // Reset processing state for new submission
     setCampaignId(null);
     setExecutionId(null);
 
@@ -124,7 +124,6 @@ export default function BroadcastPage() {
       const data: CreateResponse = await response.json();
       setCampaignId(data.campaign_id);
       setExecutionId(data.execution_id || null);
-      setSuccess(data.message || 'Campaign initiated! Agents are now processing.');
       
       // Reset form (optional - bisa di-comment jika ingin keep data)
       // setNotes('');
@@ -163,45 +162,48 @@ export default function BroadcastPage() {
   return (
     <div className="space-y-8">
       <div className="mb-6 pb-2">
-        <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2 leading-tight">
+        <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2 leading-tight pt-1 pb-1">
           Broadcast Team Agent
         </h1>
         <p className="text-gray-600 text-lg">Create and manage broadcast campaigns</p>
       </div>
 
       {/* Status Display Area */}
-      <StatusDisplay campaignId={campaignId} executionId={executionId} />
+      <StatusDisplay 
+        campaignId={campaignId} 
+        executionId={executionId}
+        onProcessingChange={setIsProcessing}
+      />
 
-      {/* Error/Success Messages */}
+      {/* Error Messages */}
       {error && (
         <Alert className="border-red-500 bg-red-50 dark:bg-red-950">
           <AlertDescription className="text-red-700 dark:text-red-300">{error}</AlertDescription>
         </Alert>
       )}
 
-      {success && (
-        <Alert className="border-green-500 bg-green-50 dark:bg-green-950">
-          <AlertDescription className="text-green-700 dark:text-green-300">{success}</AlertDescription>
-        </Alert>
-      )}
-
       {/* Campaign Form */}
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <CampaignForm value={notes} onChange={setNotes} disabled={submitting} />
+      <form onSubmit={handleSubmit} className={`space-y-6 transition-opacity duration-300 ${isProcessing ? 'opacity-50 pointer-events-none' : ''}`}>
+        <CampaignForm value={notes} onChange={setNotes} disabled={submitting || isProcessing} />
 
-        <ImageUpload onImageSelect={setImageFile} disabled={submitting} />
+        <ImageUpload onImageSelect={setImageFile} disabled={submitting || isProcessing} />
 
         {/* Generate Button */}
         <div className="flex justify-end">
           <Button
             type="submit"
-            disabled={submitting || !notes.trim()}
-            className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all px-8 py-6 text-lg font-semibold uppercase"
+            disabled={submitting || isProcessing || !notes.trim()}
+            className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all px-8 py-6 text-lg font-semibold uppercase disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {submitting ? (
               <>
                 <Loader2 className="h-5 w-5 mr-2 animate-spin" />
                 Generating...
+              </>
+            ) : isProcessing ? (
+              <>
+                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                Processing...
               </>
             ) : (
               'GENERATE'

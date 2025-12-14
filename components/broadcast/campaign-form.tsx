@@ -12,7 +12,7 @@ interface CampaignFormProps {
 
 export function CampaignForm({ value, onChange, disabled }: CampaignFormProps) {
   return (
-    <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-950 dark:to-purple-950">
+    <Card className={`border-0 shadow-lg bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-950 dark:to-purple-950 transition-opacity duration-300 ${disabled ? 'opacity-60' : ''}`}>
       <CardHeader>
         <div className="flex items-center gap-2">
           <div className="p-2 rounded-lg bg-gradient-to-br from-blue-500 to-purple-500 text-white">
@@ -35,7 +35,7 @@ export function CampaignForm({ value, onChange, disabled }: CampaignFormProps) {
             onChange={(e) => onChange(e.target.value)}
             disabled={disabled}
             placeholder="Contoh: Campaign edukasi transformasi digital untuk pabrik manufaktur di Jawa Barat. Target: owner dan plant manager. Tujuan: edukasi tentang IoT dan automation untuk efisiensi. Channel: WhatsApp. Timeline: kirim minggu depan pagi dan sore. Expected: 200-500 kontak. Konten: case study sukses, manfaat ROI, langkah awal digitalisasi."
-            className="w-full min-h-[200px] px-4 py-3 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
+            className={`w-full min-h-[200px] px-4 py-3 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y transition-opacity duration-300 ${disabled ? 'opacity-60 cursor-not-allowed bg-gray-50 dark:bg-gray-900' : ''}`}
             required
           />
         </div>

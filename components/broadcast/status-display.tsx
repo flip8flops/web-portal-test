@@ -17,6 +17,7 @@ interface StatusUpdate {
 interface StatusDisplayProps {
   campaignId: string | null;
   executionId?: string | null;
+  onProcessingChange?: (isProcessing: boolean) => void;
 }
 
 const agentLabels: Record<string, string> = {
@@ -41,9 +42,20 @@ const statusColors: Record<string, string> = {
   rejected: 'text-orange-600',
 };
 
-export function StatusDisplay({ campaignId, executionId }: StatusDisplayProps) {
+export function StatusDisplay({ campaignId, executionId, onProcessingChange }: StatusDisplayProps) {
   const [statuses, setStatuses] = useState<Record<string, StatusUpdate>>({});
   const [loading, setLoading] = useState(false);
+
+  // Notify parent when processing status changes
+  useEffect(() => {
+    if (!onProcessingChange) return;
+    
+    const isProcessing = Object.values(statuses).some(
+      (status) => status.status === 'thinking' || status.status === 'processing'
+    );
+    
+    onProcessingChange(isProcessing);
+  }, [statuses, onProcessingChange]);
 
   useEffect(() => {
     console.log('StatusDisplay: useEffect triggered', { campaignId, executionId });
@@ -274,20 +286,32 @@ export function StatusDisplay({ campaignId, executionId }: StatusDisplayProps) {
     );
   }
 
-  // CSS for dot dot dot animation
-  const dotAnimation = `
-    @keyframes blink {
-      0%, 100% { opacity: 0.2; }
-      50% { opacity: 1; }
-    }
-    .animate-blink {
-      animation: blink 1.4s infinite;
-    }
-  `;
-
   return (
     <>
-      <style dangerouslySetInnerHTML={{ __html: dotAnimation }} />
+      <style>{`
+        @keyframes dot-blink {
+          0%, 80%, 100% { 
+            opacity: 0.3; 
+            transform: scale(0.8);
+          }
+          40% { 
+            opacity: 1; 
+            transform: scale(1);
+          }
+        }
+        .dot-1 { 
+          animation: dot-blink 1.4s infinite; 
+          animation-delay: 0s; 
+        }
+        .dot-2 { 
+          animation: dot-blink 1.4s infinite; 
+          animation-delay: 0.2s; 
+        }
+        .dot-3 { 
+          animation: dot-blink 1.4s infinite; 
+          animation-delay: 0.4s; 
+        }
+      `}</style>
       <Card className="border-0 shadow-lg bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900">
         <CardContent className="p-6">
           <div className="space-y-4">
@@ -299,11 +323,14 @@ export function StatusDisplay({ campaignId, executionId }: StatusDisplayProps) {
             const icon = statusIcons[status.status] || <AlertCircle className="h-4 w-4" />;
             const color = statusColors[status.status] || 'text-gray-600';
 
+            const isCompleted = status.status === 'completed';
+            const isProcessing = status.status === 'thinking' || status.status === 'processing';
+
             return (
               <div key={agent} className="flex items-start gap-3">
                 <div className={`mt-0.5 ${color}`}>{icon}</div>
                 <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center gap-2">
                     <span className="font-medium text-gray-900 dark:text-gray-100">{label}</span>
                     <Badge
                       variant="outline"
@@ -312,25 +339,28 @@ export function StatusDisplay({ campaignId, executionId }: StatusDisplayProps) {
                       {status.status}
                     </Badge>
                   </div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1">
-                    <span>{status.message || 'Processing...'}</span>
-                    {(status.status === 'thinking' || status.status === 'processing') && (
-                      <span className="inline-flex gap-0.5 ml-1">
-                        <span className="animate-blink" style={{ animationDelay: '0s' }}>.</span>
-                        <span className="animate-blink" style={{ animationDelay: '0.2s' }}>.</span>
-                        <span className="animate-blink" style={{ animationDelay: '0.4s' }}>.</span>
-                      </span>
-                    )}
-                  </p>
-                  {status.progress > 0 && status.progress < 100 && (
-                    <div className="mt-2">
-                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
-                        <div
-                          className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
-                          style={{ width: `${status.progress}%` }}
-                        />
-                      </div>
-                    </div>
+                  {/* Only show message detail for processing agents */}
+                  {isProcessing && (
+                    <>
+                      <p className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1 mt-1">
+                        <span>{status.message || 'Processing...'}</span>
+                        <span className="inline-flex gap-0.5 ml-1 items-center">
+                          <span className="dot-1">.</span>
+                          <span className="dot-2">.</span>
+                          <span className="dot-3">.</span>
+                        </span>
+                      </p>
+                      {status.progress > 0 && status.progress < 100 && (
+                        <div className="mt-2">
+                          <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+                            <div
+                              className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
+                              style={{ width: `${status.progress}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
