@@ -61,7 +61,7 @@ export default function BroadcastPage() {
                 return;
               }
               
-              const savedCampaignId = localStorage.getItem('current_campaign_id');
+              let savedCampaignId = localStorage.getItem('current_campaign_id');
               const savedExecutionId = localStorage.getItem('current_execution_id');
               const savedTimestamp = localStorage.getItem('current_campaign_timestamp');
               
@@ -88,18 +88,31 @@ export default function BroadcastPage() {
                 }
               }
               
+              // IMPORTANT: Skip 'pending' campaign_id (not a valid UUID)
+              if (savedCampaignId === 'pending') {
+                console.warn('⚠️ Saved campaign_id is "pending", skipping campaign_id query (will use execution_id only)');
+                // Remove invalid 'pending' from localStorage
+                localStorage.removeItem('current_campaign_id');
+                savedCampaignId = null;
+              }
+              
               if (savedCampaignId || savedExecutionId) {
                 console.log('✅ Found saved campaign session, verifying status...');
+                
                 // Query ALL status updates untuk campaign/execution (bukan hanya 1 terakhir)
                 let query = supabase
                   .schema('citia_mora_datamart')
                   .from('campaign_status_updates')
                   .select('agent_name, status, updated_at');
                 
-                if (savedCampaignId) {
+                if (savedCampaignId && savedCampaignId !== 'pending') {
                   query = query.eq('campaign_id', savedCampaignId);
                 } else if (savedExecutionId) {
                   query = query.eq('execution_id', savedExecutionId);
+                } else {
+                  console.warn('⚠️ No valid campaign_id or execution_id for query');
+                  setRestoringSession(false);
+                  return;
                 }
                 
                 const { data: allStatuses, error } = await query
@@ -287,11 +300,14 @@ export default function BroadcastPage() {
       setExecutionId(data.execution_id || null);
       
       // Save to localStorage for persistence with timestamp
+      // IMPORTANT: Don't save 'pending' as campaign_id (it's not a valid UUID)
       if (typeof window !== 'undefined' && window.localStorage) {
-        if (data.campaign_id) {
+        if (data.campaign_id && data.campaign_id !== 'pending') {
           localStorage.setItem('current_campaign_id', data.campaign_id);
           localStorage.setItem('current_campaign_timestamp', Date.now().toString());
           console.log('💾 Saved campaign_id to localStorage:', data.campaign_id);
+        } else if (data.campaign_id === 'pending') {
+          console.log('⚠️ Skipping save: campaign_id is "pending" (not a valid UUID)');
         }
         if (data.execution_id) {
           localStorage.setItem('current_execution_id', data.execution_id);
