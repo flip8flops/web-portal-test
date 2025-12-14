@@ -296,7 +296,7 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
           }
           40% { 
             opacity: 1; 
-            transform: scale(1);
+            transform: scale(1.2);
           }
         }
         .dot-1 { 
@@ -325,6 +325,7 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
 
             const isCompleted = status.status === 'completed';
             const isProcessing = status.status === 'thinking' || status.status === 'processing';
+            const isError = status.status === 'error';
 
             return (
               <div key={agent} className="flex items-start gap-3">
@@ -339,16 +340,22 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
                       {status.status}
                     </Badge>
                   </div>
-                  {/* Only show message detail for processing agents */}
-                  {isProcessing && (
+                  {/* Show message detail for processing OR error agents */}
+                  {(isProcessing || isError) && (
                     <>
-                      <p className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1 mt-1">
-                        <span>{status.message || 'Processing...'}</span>
-                        <span className="inline-flex gap-0.5 ml-1 items-center">
-                          <span className="dot-1">.</span>
-                          <span className="dot-2">.</span>
-                          <span className="dot-3">.</span>
-                        </span>
+                      <p className={`text-sm flex items-center gap-1 mt-1 ${
+                        isError 
+                          ? 'text-red-600 dark:text-red-400 font-semibold' 
+                          : 'text-gray-600 dark:text-gray-400'
+                      }`}>
+                        <span>{status.message || (isError ? 'An error occurred' : 'Processing...')}</span>
+                        {isProcessing && (
+                          <span className="inline-flex gap-1 ml-1 items-center">
+                            <span className="dot-1 inline-block w-2.5 h-2.5 rounded-full bg-current opacity-30"></span>
+                            <span className="dot-2 inline-block w-2.5 h-2.5 rounded-full bg-current opacity-30"></span>
+                            <span className="dot-3 inline-block w-2.5 h-2.5 rounded-full bg-current opacity-30"></span>
+                          </span>
+                        )}
                       </p>
                       {status.progress > 0 && status.progress < 100 && (
                         <div className="mt-2">
