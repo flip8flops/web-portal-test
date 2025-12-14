@@ -154,9 +154,16 @@ export default function BroadcastPage() {
                   setCampaignId(savedCampaignId);
                   setExecutionId(savedExecutionId);
                 }
+              } else {
+                // Tidak ada status sama sekali, tapi ada saved IDs
+                // Restore untuk safety (mungkin status belum muncul)
+                console.log('No status data, restoring session for safety');
+                setCampaignId(savedCampaignId);
+                setExecutionId(savedExecutionId);
               }
             } catch (err) {
               console.error('Error restoring campaign session:', err);
+              // On error, don't restore but also don't clear (might be network issue)
             } finally {
               setRestoringSession(false);
             }
@@ -260,10 +267,14 @@ export default function BroadcastPage() {
     }
   };
 
-  if (loading) {
+  // Show loading while checking session or restoring campaign state
+  if (loading || restoringSession) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+        {restoringSession && (
+          <p className="ml-3 text-gray-600 dark:text-gray-400">Restoring campaign session...</p>
+        )}
       </div>
     );
   }
