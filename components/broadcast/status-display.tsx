@@ -61,6 +61,9 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
   useEffect(() => {
     console.log('StatusDisplay: useEffect triggered', { campaignId, executionId });
     
+    // Clear statuses when IDs change (to prevent flickering from previous execution)
+    setStatuses({});
+    
     // Need either campaignId (not 'pending') or executionId
     const hasValidId = (campaignId && campaignId !== 'pending') || executionId;
     
@@ -73,8 +76,18 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
     console.log('StatusDisplay: Starting fetch with ID:', { campaignId, executionId });
     setLoading(true);
 
+    // Store current IDs to prevent fetching with stale IDs
+    const currentCampaignId = campaignId;
+    const currentExecutionId = executionId;
+    
     // Initial fetch
     const fetchStatuses = async () => {
+      // Check if IDs have changed (new submission) - don't fetch with stale IDs
+      if (currentCampaignId !== campaignId || currentExecutionId !== executionId) {
+        console.log('StatusDisplay: IDs changed, skipping fetch');
+        return;
+      }
+      
       try {
         // Query directly to citia_mora_datamart schema
         // Schema must be exposed in Supabase Data API settings
@@ -84,12 +97,12 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
           .select('agent_name, status, message, progress, updated_at, campaign_id, execution_id');
 
         // Query by campaign_id if available and not 'pending'
-        if (campaignId && campaignId !== 'pending') {
-          query = query.eq('campaign_id', campaignId);
+        if (currentCampaignId && currentCampaignId !== 'pending') {
+          query = query.eq('campaign_id', currentCampaignId);
         } 
         // Fallback to execution_id
-        else if (executionId) {
-          query = query.eq('execution_id', executionId);
+        else if (currentExecutionId) {
+          query = query.eq('execution_id', currentExecutionId);
         } 
         // If no ID yet, query recent updates (last 5 minutes) and filter client-side
         else {
@@ -127,12 +140,12 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
         const latestStatuses: Record<string, StatusUpdate> = {};
         if (data) {
           data.forEach((update: any) => {
-            // If we have executionId, filter by it
-            if (executionId && update.execution_id !== executionId) {
+            // Double-check executionId filter (prevent stale data)
+            if (currentExecutionId && update.execution_id !== currentExecutionId) {
               return;
             }
-            // If we have campaignId, filter by it
-            if (campaignId && campaignId !== 'pending' && update.campaign_id !== campaignId) {
+            // Double-check campaignId filter (prevent stale data)
+            if (currentCampaignId && currentCampaignId !== 'pending' && update.campaign_id !== currentCampaignId) {
               return;
             }
             
@@ -142,7 +155,11 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
             }
           });
         }
-        setStatuses(latestStatuses);
+        
+        // Only update statuses if IDs haven't changed (prevent flickering)
+        if (currentCampaignId === campaignId && currentExecutionId === executionId) {
+          setStatuses(latestStatuses);
+        }
         setLoading(false);
       } catch (err) {
         console.error('Error in fetchStatuses:', err);
@@ -153,15 +170,29 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
     // Fetch immediately
     fetchStatuses();
 
+    // Store current IDs to prevent polling with stale IDs
+    const currentCampaignId = campaignId;
+    const currentExecutionId = executionId;
+    
     // Set up polling as fallback (every 2 seconds for first 30 seconds, then every 5 seconds)
     let pollCount = 0;
     const pollInterval = setInterval(() => {
+      // Check if IDs have changed (new submission)
+      if (currentCampaignId !== campaignId || currentExecutionId !== executionId) {
+        clearInterval(pollInterval);
+        return;
+      }
       pollCount++;
       fetchStatuses();
       // After 15 polls (30 seconds), reduce frequency to every 5 seconds
       if (pollCount >= 15) {
         clearInterval(pollInterval);
         const slowPollInterval = setInterval(() => {
+          // Check if IDs have changed (new submission)
+          if (currentCampaignId !== campaignId || currentExecutionId !== executionId) {
+            clearInterval(slowPollInterval);
+            return;
+          }
           fetchStatuses();
         }, 5000);
         // Clear slow polling after 5 minutes total
@@ -175,13 +206,13 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
     let channel: ReturnType<typeof supabase.channel> | null = null;
     
     try {
-      const channelName = `campaign_status:${campaignId || executionId || 'unknown'}`;
+      const channelName = `campaign_status:${currentCampaignId || currentExecutionId || 'unknown'}`;
       let filter: string;
       
-      if (campaignId && campaignId !== 'pending') {
-        filter = `campaign_id=eq.${campaignId}`;
-      } else if (executionId) {
-        filter = `execution_id=eq.${executionId}`;
+      if (currentCampaignId && currentCampaignId !== 'pending') {
+        filter = `campaign_id=eq.${currentCampaignId}`;
+      } else if (currentExecutionId) {
+        filter = `execution_id=eq.${currentExecutionId}`;
       } else {
         // No filter available, rely on polling only
         console.warn('StatusDisplay: No filter available (no campaign_id or execution_id), using polling only');
@@ -201,9 +232,25 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
             filter: filter,
           },
           (payload) => {
+            // Check if IDs have changed (new submission) - ignore updates from old execution
+            if (currentCampaignId !== campaignId || currentExecutionId !== executionId) {
+              console.log('StatusDisplay: Ignoring update from old execution');
+              return;
+            }
             console.log('StatusDisplay: Real-time update received:', payload);
             if (payload.new) {
               const update = payload.new as StatusUpdate;
+              // Double-check execution_id or campaign_id matches
+              const updateExecutionId = (payload.new as any).execution_id;
+              const updateCampaignId = (payload.new as any).campaign_id;
+              if (currentExecutionId && updateExecutionId !== currentExecutionId) {
+                console.log('StatusDisplay: Ignoring update - execution_id mismatch');
+                return;
+              }
+              if (currentCampaignId && currentCampaignId !== 'pending' && updateCampaignId !== currentCampaignId) {
+                console.log('StatusDisplay: Ignoring update - campaign_id mismatch');
+                return;
+              }
               console.log('StatusDisplay: Updating status for agent:', update.agent_name, {
                 status: update.status,
                 message: update.message?.substring(0, 50) + '...',
@@ -236,8 +283,11 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
     return () => {
       clearInterval(pollInterval);
       if (channel) {
+        console.log('StatusDisplay: Cleaning up subscription');
         supabase.removeChannel(channel);
       }
+      // Clear statuses on cleanup to prevent flickering
+      setStatuses({});
     };
   }, [campaignId, executionId]);
 
@@ -328,8 +378,19 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
             const isProcessing = status.status === 'thinking' || status.status === 'processing';
             const isError = status.status === 'error';
             const isRejected = status.status === 'rejected';
-            // Show message for processing, error, or final status (completed/rejected)
-            const shouldShowMessage = isProcessing || isError || isCompleted || isRejected;
+            
+            // Find the last agent with status (the one currently processing or most recent)
+            // Check if this is the last agent that has a status in the ordered list
+            const agentsWithStatus = agents.filter(a => statuses[a]);
+            const currentAgentIndexInList = agentsWithStatus.indexOf(agent);
+            const isLastAgentWithStatus = currentAgentIndexInList === agentsWithStatus.length - 1;
+            
+            // Only show message detail for:
+            // 1. Agent yang sedang processing/thinking (always show - untuk semua agent yang processing)
+            // 2. Agent terakhir yang ada status (jika completed/rejected/error, show detail hanya untuk yang terakhir)
+            // 3. Error status (always show - untuk semua agent yang error)
+            // Agent yang completed/rejected di atas (bukan yang terakhir) tidak perlu show detail
+            const shouldShowMessage = isProcessing || isError || (isLastAgentWithStatus && (isCompleted || isRejected));
             const hasMessage = status.message && status.message.trim().length > 0;
 
             return (
@@ -345,7 +406,10 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
                       {status.status}
                     </Badge>
                   </div>
-                  {/* Show message detail for processing, error, or final status (completed/rejected) */}
+                  {/* Show message detail only for:
+                      1. Agent yang sedang processing/thinking (always show)
+                      2. Agent terakhir yang ada status (jika completed/rejected/error, show detail)
+                      3. Error status (always show) */}
                   {shouldShowMessage && hasMessage && (
                     <>
                       <p className={`text-sm flex items-center gap-1 mt-1 ${
