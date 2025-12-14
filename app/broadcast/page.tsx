@@ -56,47 +56,103 @@ export default function BroadcastPage() {
             try {
               const savedCampaignId = localStorage.getItem('current_campaign_id');
               const savedExecutionId = localStorage.getItem('current_execution_id');
+              const savedTimestamp = localStorage.getItem('current_campaign_timestamp');
               
-              if (savedCampaignId || savedExecutionId) {
-                // Verify campaign is still processing by checking status updates
-                let isValid = false;
-                if (savedCampaignId) {
-                  const { data: statusData } = await supabase
-                    .schema('citia_mora_datamart')
-                    .from('campaign_status_updates')
-                    .select('status, agent_name')
-                    .eq('campaign_id', savedCampaignId)
-                    .order('created_at', { ascending: false })
-                    .limit(1);
-                  
-                  if (statusData && statusData.length > 0) {
-                    const latestStatus = statusData[0];
-                    // Only restore if campaign is still processing (not completed/rejected/error)
-                    isValid = latestStatus.status === 'processing' || latestStatus.status === 'thinking';
-                  }
-                } else if (savedExecutionId) {
-                  const { data: statusData } = await supabase
-                    .schema('citia_mora_datamart')
-                    .from('campaign_status_updates')
-                    .select('status, agent_name')
-                    .eq('execution_id', savedExecutionId)
-                    .order('created_at', { ascending: false })
-                    .limit(1);
-                  
-                  if (statusData && statusData.length > 0) {
-                    const latestStatus = statusData[0];
-                    isValid = latestStatus.status === 'processing' || latestStatus.status === 'thinking';
-                  }
-                }
+              // Check expiry (24 hours)
+              if (savedTimestamp) {
+                const timestamp = parseInt(savedTimestamp, 10);
+                const now = Date.now();
+                const hoursSinceSave = (now - timestamp) / (1000 * 60 * 60);
                 
-                if (isValid) {
-                  console.log('Restoring campaign session:', { savedCampaignId, savedExecutionId });
-                  setCampaignId(savedCampaignId);
-                  setExecutionId(savedExecutionId);
-                } else {
-                  // Clear invalid session
+                if (hoursSinceSave > 24) {
+                  console.log('Campaign session expired (>24 hours), clearing localStorage');
                   localStorage.removeItem('current_campaign_id');
                   localStorage.removeItem('current_execution_id');
+                  localStorage.removeItem('current_campaign_timestamp');
+                  setRestoringSession(false);
+                  return;
+                }
+              }
+              
+              if (savedCampaignId || savedExecutionId) {
+                // Query ALL status updates untuk campaign/execution (bukan hanya 1 terakhir)
+                let query = supabase
+                  .schema('citia_mora_datamart')
+                  .from('campaign_status_updates')
+                  .select('agent_name, status, updated_at');
+                
+                if (savedCampaignId) {
+                  query = query.eq('campaign_id', savedCampaignId);
+                } else if (savedExecutionId) {
+                  query = query.eq('execution_id', savedExecutionId);
+                }
+                
+                const { data: allStatuses, error } = await query
+                  .order('created_at', { ascending: false });
+                
+                if (error) {
+                  console.error('Error checking campaign status:', error);
+                  // Clear on error to be safe
+                  localStorage.removeItem('current_campaign_id');
+                  localStorage.removeItem('current_execution_id');
+                  localStorage.removeItem('current_campaign_timestamp');
+                  setRestoringSession(false);
+                  return;
+                }
+                
+                if (allStatuses && allStatuses.length > 0) {
+                  // Check if ANY agent is still processing
+                  const hasProcessingAgent = allStatuses.some(
+                    (status) => status.status === 'processing' || status.status === 'thinking'
+                  );
+                  
+                  // Get latest status per agent
+                  const allAgents = ['guardrails', 'research_agent', 'matchmaker_agent', 'content_maker_agent'];
+                  const agentStatuses: Record<string, string> = {};
+                  
+                  allStatuses.forEach((status) => {
+                    if (!agentStatuses[status.agent_name] || 
+                        new Date(status.updated_at) > new Date(agentStatuses[status.agent_name])) {
+                      agentStatuses[status.agent_name] = status.status;
+                    }
+                  });
+                  
+                  // Check if ALL agents are finished
+                  const allFinished = allAgents.every((agent) => {
+                    const status = agentStatuses[agent];
+                    return !status || // Agent belum mulai
+                           status === 'completed' || 
+                           status === 'rejected' || 
+                           status === 'error';
+                  });
+                  
+                  if (hasProcessingAgent) {
+                    // Masih ada yang processing → restore
+                    console.log('Campaign still processing, restoring session:', { 
+                      savedCampaignId, 
+                      savedExecutionId 
+                    });
+                    setCampaignId(savedCampaignId);
+                    setExecutionId(savedExecutionId);
+                  } else if (allFinished) {
+                    // Semua sudah selesai → clear localStorage
+                    console.log('All agents finished, clearing localStorage');
+                    localStorage.removeItem('current_campaign_id');
+                    localStorage.removeItem('current_execution_id');
+                    localStorage.removeItem('current_campaign_timestamp');
+                  } else {
+                    // Edge case: belum ada status atau status tidak lengkap
+                    // Restore untuk safety (mungkin status belum muncul)
+                    console.log('Campaign status unclear, restoring session for safety');
+                    setCampaignId(savedCampaignId);
+                    setExecutionId(savedExecutionId);
+                  }
+                } else {
+                  // Tidak ada status → mungkin campaign baru dibuat
+                  // Restore untuk safety
+                  console.log('No status found, restoring session (campaign might be new)');
+                  setCampaignId(savedCampaignId);
+                  setExecutionId(savedExecutionId);
                 }
               }
             } catch (err) {
@@ -184,9 +240,10 @@ export default function BroadcastPage() {
       setCampaignId(data.campaign_id);
       setExecutionId(data.execution_id || null);
       
-      // Save to localStorage for persistence
+      // Save to localStorage for persistence with timestamp
       if (data.campaign_id) {
         localStorage.setItem('current_campaign_id', data.campaign_id);
+        localStorage.setItem('current_campaign_timestamp', Date.now().toString());
       }
       if (data.execution_id) {
         localStorage.setItem('current_execution_id', data.execution_id);

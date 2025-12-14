@@ -64,13 +64,20 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
     
     // Clear localStorage when processing is complete (all agents completed/rejected/error)
     if (!isProcessing && Object.keys(statuses).length > 0) {
-      const allFinished = Object.values(statuses).every(
-        (status) => status.status === 'completed' || status.status === 'rejected' || status.status === 'error'
-      );
+      const allAgents = ['guardrails', 'research_agent', 'matchmaker_agent', 'content_maker_agent'];
+      const allFinished = allAgents.every((agent) => {
+        const status = statuses[agent];
+        return !status || // Agent belum mulai (tidak perlu clear)
+               status.status === 'completed' || 
+               status.status === 'rejected' || 
+               status.status === 'error';
+      });
+      
       if (allFinished) {
         console.log('All agents finished, clearing localStorage');
         localStorage.removeItem('current_campaign_id');
         localStorage.removeItem('current_execution_id');
+        localStorage.removeItem('current_campaign_timestamp');
       }
     }
   }, [statuses, onProcessingChange]);
