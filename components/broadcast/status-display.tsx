@@ -74,10 +74,12 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
       });
       
       if (allFinished) {
-        console.log('All agents finished, clearing localStorage');
-        localStorage.removeItem('current_campaign_id');
-        localStorage.removeItem('current_execution_id');
-        localStorage.removeItem('current_campaign_timestamp');
+        console.log('✅ All agents finished, clearing localStorage');
+        if (typeof window !== 'undefined' && window.localStorage) {
+          localStorage.removeItem('current_campaign_id');
+          localStorage.removeItem('current_execution_id');
+          localStorage.removeItem('current_campaign_timestamp');
+        }
       }
     }
   }, [statuses, onProcessingChange]);
