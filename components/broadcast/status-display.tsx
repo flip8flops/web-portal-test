@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/src/lib/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -46,6 +46,11 @@ const statusColors: Record<string, string> = {
 export function StatusDisplay({ campaignId, executionId, onProcessingChange }: StatusDisplayProps) {
   const [statuses, setStatuses] = useState<Record<string, StatusUpdate>>({});
   const [loading, setLoading] = useState(false);
+  // Use ref to track current IDs and prevent race conditions
+  const currentIdsRef = useRef<{ campaignId: string | null; executionId: string | null }>({
+    campaignId: null,
+    executionId: null,
+  });
 
   // Notify parent when processing status changes
   useEffect(() => {
@@ -56,13 +61,34 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
     );
     
     onProcessingChange(isProcessing);
+    
+    // Clear localStorage when processing is complete (all agents completed/rejected/error)
+    if (!isProcessing && Object.keys(statuses).length > 0) {
+      const allFinished = Object.values(statuses).every(
+        (status) => status.status === 'completed' || status.status === 'rejected' || status.status === 'error'
+      );
+      if (allFinished) {
+        console.log('All agents finished, clearing localStorage');
+        localStorage.removeItem('current_campaign_id');
+        localStorage.removeItem('current_execution_id');
+      }
+    }
   }, [statuses, onProcessingChange]);
 
   useEffect(() => {
     console.log('StatusDisplay: useEffect triggered', { campaignId, executionId });
     
-    // Clear statuses when IDs change (to prevent flickering from previous execution)
-    setStatuses({});
+    // Check if IDs have changed - if so, clear statuses immediately
+    const idsChanged = 
+      currentIdsRef.current.campaignId !== campaignId || 
+      currentIdsRef.current.executionId !== executionId;
+    
+    if (idsChanged) {
+      console.log('StatusDisplay: IDs changed, clearing statuses immediately');
+      setStatuses({});
+      // Update ref immediately to prevent any stale updates
+      currentIdsRef.current = { campaignId, executionId };
+    }
     
     // Need either campaignId (not 'pending') or executionId
     const hasValidId = (campaignId && campaignId !== 'pending') || executionId;
@@ -70,20 +96,24 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
     if (!hasValidId) {
       console.log('StatusDisplay: No valid ID, clearing statuses');
       setStatuses({});
+      currentIdsRef.current = { campaignId: null, executionId: null };
       return;
     }
 
     console.log('StatusDisplay: Starting fetch with ID:', { campaignId, executionId });
     setLoading(true);
 
-    // Store current IDs to prevent fetching with stale IDs
+    // Store current IDs in ref and local variables
+    currentIdsRef.current = { campaignId, executionId };
     const currentCampaignId = campaignId;
     const currentExecutionId = executionId;
     
     // Initial fetch
     const fetchStatuses = async () => {
       // Check if IDs have changed (new submission) - don't fetch with stale IDs
-      if (currentCampaignId !== campaignId || currentExecutionId !== executionId) {
+      // Use ref to get latest values
+      if (currentIdsRef.current.campaignId !== currentCampaignId || 
+          currentIdsRef.current.executionId !== currentExecutionId) {
         console.log('StatusDisplay: IDs changed, skipping fetch');
         return;
       }
@@ -157,8 +187,12 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
         }
         
         // Only update statuses if IDs haven't changed (prevent flickering)
-        if (currentCampaignId === campaignId && currentExecutionId === executionId) {
+        // Use ref to check latest values
+        if (currentIdsRef.current.campaignId === currentCampaignId && 
+            currentIdsRef.current.executionId === currentExecutionId) {
           setStatuses(latestStatuses);
+        } else {
+          console.log('StatusDisplay: IDs changed during fetch, ignoring results');
         }
         setLoading(false);
       } catch (err) {
@@ -177,8 +211,10 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
     // Set up polling as fallback (every 2 seconds for first 30 seconds, then every 5 seconds)
     let pollCount = 0;
     const pollInterval = setInterval(() => {
-      // Check if IDs have changed (new submission)
-      if (currentCampaignId !== campaignId || currentExecutionId !== executionId) {
+      // Check if IDs have changed (new submission) - use ref for latest values
+      if (currentIdsRef.current.campaignId !== currentCampaignId || 
+          currentIdsRef.current.executionId !== currentExecutionId) {
+        console.log('StatusDisplay: IDs changed, stopping polling');
         clearInterval(pollInterval);
         return;
       }
@@ -188,8 +224,10 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
       if (pollCount >= 15) {
         clearInterval(pollInterval);
         const slowPollInterval = setInterval(() => {
-          // Check if IDs have changed (new submission)
-          if (currentCampaignId !== campaignId || currentExecutionId !== executionId) {
+          // Check if IDs have changed (new submission) - use ref for latest values
+          if (currentIdsRef.current.campaignId !== currentCampaignId || 
+              currentIdsRef.current.executionId !== currentExecutionId) {
+            console.log('StatusDisplay: IDs changed, stopping slow polling');
             clearInterval(slowPollInterval);
             return;
           }
@@ -233,7 +271,9 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
           },
           (payload) => {
             // Check if IDs have changed (new submission) - ignore updates from old execution
-            if (currentCampaignId !== campaignId || currentExecutionId !== executionId) {
+            // Use ref to get latest values
+            if (currentIdsRef.current.campaignId !== currentCampaignId || 
+                currentIdsRef.current.executionId !== currentExecutionId) {
               console.log('StatusDisplay: Ignoring update from old execution');
               return;
             }
@@ -249,6 +289,12 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
               }
               if (currentCampaignId && currentCampaignId !== 'pending' && updateCampaignId !== currentCampaignId) {
                 console.log('StatusDisplay: Ignoring update - campaign_id mismatch');
+                return;
+              }
+              // Final check with ref before updating
+              if (currentIdsRef.current.campaignId !== currentCampaignId || 
+                  currentIdsRef.current.executionId !== currentExecutionId) {
+                console.log('StatusDisplay: IDs changed during real-time update, ignoring');
                 return;
               }
               console.log('StatusDisplay: Updating status for agent:', update.agent_name, {
@@ -386,10 +432,11 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
             const isLastAgentWithStatus = currentAgentIndexInList === agentsWithStatus.length - 1;
             
             // Only show message detail for:
-            // 1. Agent yang sedang processing/thinking (always show - untuk semua agent yang processing)
+            // 1. Agent yang sedang processing/thinking (always show)
             // 2. Agent terakhir yang ada status (jika completed/rejected/error, show detail hanya untuk yang terakhir)
-            // 3. Error status (always show - untuk semua agent yang error)
-            // Agent yang completed/rejected di atas (bukan yang terakhir) tidak perlu show detail
+            // 3. Error status (always show)
+            // Agent yang completed/rejected di atas (bukan yang terakhir) TIDAK show detail
+            // Logic: hanya show detail jika processing/error ATAU (completed/rejected DAN ini agent terakhir)
             const shouldShowMessage = isProcessing || isError || (isLastAgentWithStatus && (isCompleted || isRejected));
             const hasMessage = status.message && status.message.trim().length > 0;
 

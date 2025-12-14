@@ -32,6 +32,7 @@ export default function BroadcastPage() {
   const [campaignId, setCampaignId] = useState<string | null>(null);
   const [executionId, setExecutionId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [restoringSession, setRestoringSession] = useState(true);
 
   useEffect(() => {
     let mounted = true;
@@ -44,17 +45,75 @@ export default function BroadcastPage() {
 
     supabase.auth
       .getSession()
-      .then(({ data: { session } }) => {
+      .then(async ({ data: { session } }) => {
         if (mounted) {
           setSession(session);
           setLoading(false);
           clearTimeout(timeout);
+          
+          // Restore campaign session from localStorage
+          if (session) {
+            try {
+              const savedCampaignId = localStorage.getItem('current_campaign_id');
+              const savedExecutionId = localStorage.getItem('current_execution_id');
+              
+              if (savedCampaignId || savedExecutionId) {
+                // Verify campaign is still processing by checking status updates
+                let isValid = false;
+                if (savedCampaignId) {
+                  const { data: statusData } = await supabase
+                    .schema('citia_mora_datamart')
+                    .from('campaign_status_updates')
+                    .select('status, agent_name')
+                    .eq('campaign_id', savedCampaignId)
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+                  
+                  if (statusData && statusData.length > 0) {
+                    const latestStatus = statusData[0];
+                    // Only restore if campaign is still processing (not completed/rejected/error)
+                    isValid = latestStatus.status === 'processing' || latestStatus.status === 'thinking';
+                  }
+                } else if (savedExecutionId) {
+                  const { data: statusData } = await supabase
+                    .schema('citia_mora_datamart')
+                    .from('campaign_status_updates')
+                    .select('status, agent_name')
+                    .eq('execution_id', savedExecutionId)
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+                  
+                  if (statusData && statusData.length > 0) {
+                    const latestStatus = statusData[0];
+                    isValid = latestStatus.status === 'processing' || latestStatus.status === 'thinking';
+                  }
+                }
+                
+                if (isValid) {
+                  console.log('Restoring campaign session:', { savedCampaignId, savedExecutionId });
+                  setCampaignId(savedCampaignId);
+                  setExecutionId(savedExecutionId);
+                } else {
+                  // Clear invalid session
+                  localStorage.removeItem('current_campaign_id');
+                  localStorage.removeItem('current_execution_id');
+                }
+              }
+            } catch (err) {
+              console.error('Error restoring campaign session:', err);
+            } finally {
+              setRestoringSession(false);
+            }
+          } else {
+            setRestoringSession(false);
+          }
         }
       })
       .catch(() => {
         if (mounted) {
           setLoading(false);
           clearTimeout(timeout);
+          setRestoringSession(false);
         }
       });
 
@@ -124,6 +183,14 @@ export default function BroadcastPage() {
       const data: CreateResponse = await response.json();
       setCampaignId(data.campaign_id);
       setExecutionId(data.execution_id || null);
+      
+      // Save to localStorage for persistence
+      if (data.campaign_id) {
+        localStorage.setItem('current_campaign_id', data.campaign_id);
+      }
+      if (data.execution_id) {
+        localStorage.setItem('current_execution_id', data.execution_id);
+      }
       
       // Reset form (optional - bisa di-comment jika ingin keep data)
       // setNotes('');
