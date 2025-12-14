@@ -24,6 +24,7 @@ const agentLabels: Record<string, string> = {
   guardrails: 'Guardrails',
   research_agent: 'Research Agent',
   matchmaker_agent: 'Matchmaker Agent',
+  content_maker_agent: 'Content Maker Agent',
 };
 
 const statusIcons: Record<string, React.ReactNode> = {
@@ -270,7 +271,7 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
   }
 
   // Show statuses
-  const agents = ['guardrails', 'research_agent', 'matchmaker_agent'];
+  const agents = ['guardrails', 'research_agent', 'matchmaker_agent', 'content_maker_agent'];
   const hasAnyStatus = agents.some((agent) => statuses[agent]);
 
   if (!hasAnyStatus) {
