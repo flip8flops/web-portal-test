@@ -143,52 +143,62 @@ export default function BroadcastPage() {
                   
                   if (hasProcessingAgent) {
                     // Masih ada yang processing → restore
+                    const processingAgents = allStatuses.filter(s => s.status === 'processing' || s.status === 'thinking').map(s => s.agent_name);
                     console.log('✅ Campaign still processing, restoring session:', { 
                       savedCampaignId, 
                       savedExecutionId,
-                      processingAgents: allStatuses.filter(s => s.status === 'processing' || s.status === 'thinking').map(s => s.agent_name)
+                      processingAgents,
+                      allStatusesCount: allStatuses.length
                     });
-                    // Use setTimeout to ensure state update happens after component mount
-                    setTimeout(() => {
+                    // Set state directly (mounted check already done)
+                    if (mounted) {
                       setCampaignId(savedCampaignId);
                       setExecutionId(savedExecutionId);
                       console.log('✅ State updated with campaignId:', savedCampaignId, 'executionId:', savedExecutionId);
-                    }, 0);
+                    } else {
+                      console.warn('⚠️ Component unmounted, cannot restore state');
+                    }
                   } else if (allFinished) {
                     // Semua sudah selesai → clear localStorage
                     console.log('✅ All agents finished, clearing localStorage');
-                    localStorage.removeItem('current_campaign_id');
-                    localStorage.removeItem('current_execution_id');
-                    localStorage.removeItem('current_campaign_timestamp');
+                    if (typeof window !== 'undefined' && window.localStorage) {
+                      localStorage.removeItem('current_campaign_id');
+                      localStorage.removeItem('current_execution_id');
+                      localStorage.removeItem('current_campaign_timestamp');
+                    }
                   } else {
                     // Edge case: belum ada status atau status tidak lengkap
                     // Restore untuk safety (mungkin status belum muncul)
-                    console.log('⚠️ Campaign status unclear, restoring session for safety');
-                    setTimeout(() => {
+                    console.log('⚠️ Campaign status unclear, restoring session for safety', {
+                      agentStatuses,
+                      allFinished
+                    });
+                    if (mounted) {
                       setCampaignId(savedCampaignId);
                       setExecutionId(savedExecutionId);
                       console.log('✅ State updated (safety restore)');
-                    }, 0);
+                    } else {
+                      console.warn('⚠️ Component unmounted, cannot restore state');
+                    }
                   }
                 } else {
                   // Tidak ada status → mungkin campaign baru dibuat
                   // Restore untuk safety
-                  console.log('⚠️ No status found, restoring session (campaign might be new)');
-                  setTimeout(() => {
+                  console.log('⚠️ No status found, restoring session (campaign might be new)', {
+                    savedCampaignId,
+                    savedExecutionId
+                  });
+                  if (mounted) {
                     setCampaignId(savedCampaignId);
                     setExecutionId(savedExecutionId);
                     console.log('✅ State updated (no status found)');
-                  }, 0);
+                  } else {
+                    console.warn('⚠️ Component unmounted, cannot restore state');
+                  }
                 }
               } else {
-                // Tidak ada status sama sekali, tapi ada saved IDs
-                // Restore untuk safety (mungkin status belum muncul)
-                console.log('⚠️ No status data, restoring session for safety');
-                setTimeout(() => {
-                  setCampaignId(savedCampaignId);
-                  setExecutionId(savedExecutionId);
-                  console.log('✅ State updated (no status data)');
-                }, 0);
+                // Tidak ada saved IDs di localStorage
+                console.log('ℹ️ No saved campaign session in localStorage');
               }
             } catch (err) {
               console.error('Error restoring campaign session:', err);
