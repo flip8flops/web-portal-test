@@ -12,6 +12,10 @@ interface StatusUpdate {
   message: string | null;
   progress: number;
   updated_at: string;
+  metadata?: {
+    workflow_point?: string;
+    [key: string]: any;
+  };
 }
 
 interface StatusDisplayProps {
@@ -22,6 +26,7 @@ interface StatusDisplayProps {
 
 const agentLabels: Record<string, string> = {
   guardrails: 'Guardrails',
+  guardrails_qc: 'Guardrails QC',
   research_agent: 'Research Agent',
   matchmaker_agent: 'Matchmaker Agent',
   content_maker_agent: 'Content Maker Agent',
@@ -64,7 +69,7 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
     
     // Clear localStorage when processing is complete (all agents completed/rejected/error)
     if (!isProcessing && Object.keys(statuses).length > 0) {
-      const allAgents = ['guardrails', 'research_agent', 'matchmaker_agent', 'content_maker_agent'];
+      const allAgents = ['guardrails', 'research_agent', 'matchmaker_agent', 'content_maker_agent', 'guardrails_qc'];
       const allFinished = allAgents.every((agent) => {
         const status = statuses[agent];
         return !status || // Agent belum mulai (tidak perlu clear)
@@ -133,7 +138,7 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
         let query = supabase
           .schema('citia_mora_datamart')
           .from('campaign_status_updates')
-          .select('agent_name, status, message, progress, updated_at, campaign_id, execution_id');
+          .select('agent_name, status, message, progress, updated_at, campaign_id, execution_id, metadata');
 
         // Query by campaign_id if available and not 'pending'
         if (currentCampaignId && currentCampaignId !== 'pending') {
@@ -176,7 +181,10 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
         }
 
         // Get latest status per agent
+        // Special handling: guardrails appears twice (initial and QC), need to differentiate
         const latestStatuses: Record<string, StatusUpdate> = {};
+        const guardrailsUpdates: Array<{ update: any; timestamp: Date }> = [];
+        
         if (data) {
           data.forEach((update: any) => {
             // Double-check executionId filter (prevent stale data)
@@ -188,11 +196,58 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
               return;
             }
             
-            if (!latestStatuses[update.agent_name] || 
-                new Date(update.updated_at) > new Date(latestStatuses[update.agent_name].updated_at)) {
-              latestStatuses[update.agent_name] = update as StatusUpdate;
+            // Special handling for guardrails: collect all guardrails updates
+            if (update.agent_name === 'guardrails') {
+              guardrailsUpdates.push({
+                update,
+                timestamp: new Date(update.updated_at)
+              });
+            } else {
+              // For other agents, use standard logic
+              if (!latestStatuses[update.agent_name] || 
+                  new Date(update.updated_at) > new Date(latestStatuses[update.agent_name].updated_at)) {
+                latestStatuses[update.agent_name] = update as StatusUpdate;
+              }
             }
           });
+          
+          // Process guardrails updates: separate into initial and QC
+          if (guardrailsUpdates.length > 0) {
+            // Sort by timestamp
+            guardrailsUpdates.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+            
+            // Get content_maker_agent status to determine if we're past that phase
+            const contentMakerStatus = latestStatuses['content_maker_agent'];
+            const contentMakerTime = contentMakerStatus ? new Date(contentMakerStatus.updated_at) : null;
+            
+            // Separate guardrails into initial (before content_maker) and QC (after content_maker)
+            guardrailsUpdates.forEach(({ update, timestamp }) => {
+              const metadata = update.metadata || {};
+              const workflowPoint = metadata.workflow_point || '';
+              
+              // Check if this is QC phase guardrails:
+              // 1. workflow_point indicates QC phase, OR
+              // 2. It comes after content_maker_agent completed
+              const isQC = workflowPoint.includes('guardrails_checking') || 
+                          workflowPoint.includes('guardrails_completed') ||
+                          workflowPoint.includes('guardrails_error') ||
+                          (contentMakerTime && timestamp > contentMakerTime);
+              
+              if (isQC) {
+                // This is QC guardrails - store as guardrails_qc
+                if (!latestStatuses['guardrails_qc'] || 
+                    timestamp > new Date(latestStatuses['guardrails_qc'].updated_at)) {
+                  latestStatuses['guardrails_qc'] = update as StatusUpdate;
+                }
+              } else {
+                // This is initial guardrails
+                if (!latestStatuses['guardrails'] || 
+                    timestamp > new Date(latestStatuses['guardrails'].updated_at)) {
+                  latestStatuses['guardrails'] = update as StatusUpdate;
+                }
+              }
+            });
+          }
         }
         
         // Only update statuses if IDs haven't changed (prevent flickering)
@@ -302,13 +357,32 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
                 console.log('StatusDisplay: IDs changed during real-time update, ignoring');
                 return;
               }
-              console.log('StatusDisplay: Updating status for agent:', update.agent_name, {
+              
+              // Special handling for guardrails: check if it's QC phase
+              let agentKey = update.agent_name;
+              if (update.agent_name === 'guardrails') {
+                const metadata = update.metadata || {};
+                const workflowPoint = metadata.workflow_point || '';
+                // Check if this is QC phase guardrails
+                if (workflowPoint.includes('guardrails_checking') || 
+                    workflowPoint.includes('guardrails_completed') ||
+                    workflowPoint.includes('guardrails_error')) {
+                  // Check if content_maker_agent already completed
+                  const currentStatuses = statuses;
+                  const contentMakerStatus = currentStatuses['content_maker_agent'];
+                  if (contentMakerStatus && contentMakerStatus.status === 'completed') {
+                    agentKey = 'guardrails_qc';
+                  }
+                }
+              }
+              
+              console.log('StatusDisplay: Updating status for agent:', agentKey, {
                 status: update.status,
                 message: update.message?.substring(0, 50) + '...',
               });
               setStatuses((prev) => ({
                 ...prev,
-                [update.agent_name]: update,
+                [agentKey]: update,
               }));
             }
           }
@@ -372,7 +446,8 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
   }
 
   // Show statuses
-  const agents = ['guardrails', 'research_agent', 'matchmaker_agent', 'content_maker_agent'];
+  // Include guardrails_qc in the list (will be shown after content_maker_agent)
+  const agents = ['guardrails', 'research_agent', 'matchmaker_agent', 'content_maker_agent', 'guardrails_qc'];
   const hasAnyStatus = agents.some((agent) => statuses[agent]);
 
   if (!hasAnyStatus) {
