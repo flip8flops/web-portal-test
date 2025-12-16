@@ -25,8 +25,8 @@ interface StatusDisplayProps {
 }
 
 const agentLabels: Record<string, string> = {
-  guardrails: 'Guardrails',
-  guardrails_qc: 'Guardrails QC',
+  guardrails: 'Guardrails In',
+  guardrails_qc: 'Guardrails Out',
   research_agent: 'Research Agent',
   matchmaker_agent: 'Matchmaker Agent',
   content_maker_agent: 'Content Maker Agent',
