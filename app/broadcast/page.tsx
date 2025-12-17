@@ -208,18 +208,20 @@ export default function BroadcastPage() {
                 if (mounted) {
                   setDraftCampaignId(latestDraftId);
                   setCampaignState(draftState);
+                  // IMPORTANT: Always set campaignId so StatusDisplay can show status
+                  setCampaignId(latestDraftId);
                   
                   if (draftState === 'drafted') {
-                    setCampaignId(latestDraftId);
+                    console.log('✅ Setting draft campaign and switching to output tab');
                     setActiveTab('output');
                     // Save to localStorage
                     if (typeof window !== 'undefined' && window.localStorage) {
                       localStorage.setItem('current_campaign_id', latestDraftId);
                       localStorage.setItem('current_campaign_timestamp', Date.now().toString());
                     }
-                    console.log('✅ Set draft campaign and switched to output tab');
                   } else if (draftState === 'approved' || draftState === 'rejected') {
                     // Clear draft, allow new campaign
+                    console.log('⚠️ Draft campaign is', draftState, '- clearing');
                     setDraftCampaignId(null);
                     setCampaignId(null);
                     setActiveTab('input');
@@ -230,10 +232,16 @@ export default function BroadcastPage() {
                     }
                   } else if (draftState === 'processing') {
                     // Still processing
-                    setCampaignId(latestDraftId);
+                    console.log('⏳ Draft campaign is still processing');
                     setActiveTab('input');
+                  } else {
+                    // Unknown state, but we have a draft campaign - show it
+                    console.log('⚠️ Unknown draft state, but campaign exists - showing in output');
+                    setActiveTab('output');
                   }
                 }
+              } else {
+                console.log('ℹ️ No draft campaign found');
               }
               
               // Also check saved campaign if no draft found or if we want to restore processing state
@@ -306,6 +314,8 @@ export default function BroadcastPage() {
 
   // Monitor campaign state changes and check for drafts
   useEffect(() => {
+    if (!session) return;
+
     const checkForDrafts = async () => {
       // Always check for latest draft campaign on mount and periodically
       const latestDraftId = await findLatestDraftCampaign();
@@ -313,29 +323,44 @@ export default function BroadcastPage() {
         const draftState = await checkCampaignState(latestDraftId);
         console.log('🔍 Periodic check - Found draft:', latestDraftId, 'State:', draftState);
         
+        setDraftCampaignId(latestDraftId);
+        setCampaignState(draftState);
+        // IMPORTANT: Always set campaignId so StatusDisplay can show status
+        setCampaignId(latestDraftId);
+        
         if (draftState === 'drafted') {
-          setDraftCampaignId(latestDraftId);
-          setCampaignState('drafted');
-          setCampaignId(latestDraftId);
           if (activeTab !== 'output') {
             setActiveTab('output');
           }
         } else if (draftState === 'approved' || draftState === 'rejected') {
           setDraftCampaignId(null);
-          setCampaignState(draftState);
+          setCampaignId(null);
           if (activeTab === 'output') {
+            setActiveTab('input');
+          }
+          if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.removeItem('current_campaign_id');
+            localStorage.removeItem('current_execution_id');
+            localStorage.removeItem('current_campaign_timestamp');
+          }
+        } else if (draftState === 'processing') {
+          if (activeTab !== 'input') {
             setActiveTab('input');
           }
         }
       } else {
-        // No draft found
-        if (campaignState === 'drafted' && !draftCampaignId) {
+        // No draft found - clear state if we had one
+        if (draftCampaignId && campaignState === 'drafted') {
+          console.log('ℹ️ No draft found, clearing draft state');
+          setDraftCampaignId(null);
           setCampaignState('idle');
+          setCampaignId(null);
         }
       }
     };
 
-    checkForDrafts();
+    // Initial check after a short delay
+    const timeout = setTimeout(checkForDrafts, 1000);
     const interval = setInterval(checkForDrafts, 5000); // Check every 5 seconds
 
     return () => clearInterval(interval);
