@@ -101,6 +101,13 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
       }
 
       console.log('✅ DraftOutput: Setting draft with', data.draft.audiences?.length || 0, 'audiences');
+      console.log('📦 Draft data:', {
+        campaign_name: data.draft.campaign_name,
+        has_objective: !!data.draft.campaign_objective,
+        has_origin_notes: !!data.draft.origin_notes,
+        tags_count: data.draft.campaign_tags?.length || 0,
+        total_audience: data.draft.total_matched_audience,
+      });
       setDraft(data.draft);
 
       // Auto-select first audience for detail view if none selected
@@ -108,6 +115,7 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
         const currentSelected = selectedAudienceDetail?.audience_id;
         const foundAudience = data.draft.audiences.find((a: DraftAudience) => a.audience_id === currentSelected);
         if (foundAudience) {
+          // Update selected audience with latest data
           setSelectedAudienceDetail(foundAudience);
         } else if (!selectedAudienceDetail) {
           setSelectedAudienceDetail(data.draft.audiences[0]);
@@ -205,27 +213,16 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
 
       console.log('✅ Content saved successfully');
       
-      // Update local state immediately for better UX
+      // Refresh draft data from server first to get latest data
+      await fetchDraft();
+      
+      // Update selected audience detail after refresh to ensure it shows updated content
       if (draft) {
-        const updatedAudiences = draft.audiences.map(aud => 
-          aud.audience_id === audienceId 
-            ? { ...aud, broadcast_content: editedContent, character_count: editedContent.length }
-            : aud
-        );
-        setDraft({ ...draft, audiences: updatedAudiences });
-        
-        // Update selected audience detail if it's the one being edited
-        if (selectedAudienceDetail?.audience_id === audienceId) {
-          setSelectedAudienceDetail({
-            ...selectedAudienceDetail,
-            broadcast_content: editedContent,
-            character_count: editedContent.length,
-          });
+        const updatedAudience = draft.audiences.find(aud => aud.audience_id === audienceId);
+        if (updatedAudience && selectedAudienceDetail?.audience_id === audienceId) {
+          setSelectedAudienceDetail(updatedAudience);
         }
       }
-      
-      // Refresh draft data from server
-      await fetchDraft();
 
       setEditingContent(null);
       setEditedContent('');
@@ -263,40 +260,49 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
       {/* Campaign Info */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl font-bold">{draft.campaign_name || 'Untitled Campaign'}</CardTitle>
+          <CardTitle className="text-2xl font-bold">
+            {draft.campaign_name || 'Untitled Campaign'}
+            {!draft.campaign_name && (
+              <span className="text-xs text-red-500 ml-2">(Title not found in meta)</span>
+            )}
+          </CardTitle>
           
           {/* Objective */}
-          {draft.campaign_objective && (
-            <div className="mt-3">
-              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Objective:</p>
+          <div className="mt-3">
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Objective:</p>
+            {draft.campaign_objective ? (
               <p className="text-sm text-gray-700 dark:text-gray-300">
                 {draft.campaign_objective}
               </p>
-            </div>
-          )}
+            ) : (
+              <p className="text-xs text-gray-400 italic">No objective found</p>
+            )}
+          </div>
           
           {/* Origin Notes */}
-          {draft.origin_notes && (
-            <div className="mt-3">
-              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Origin Notes from Admin Citia:</p>
+          <div className="mt-3">
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Origin Notes from Admin Citia:</p>
+            {draft.origin_notes ? (
               <p className="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 p-3 rounded border border-gray-200 dark:border-gray-700">
                 {draft.origin_notes}
               </p>
-            </div>
-          )}
+            ) : (
+              <p className="text-xs text-gray-400 italic">No origin notes found</p>
+            )}
+          </div>
           
           {/* Total Matched Audience */}
-          {draft.total_matched_audience !== undefined && (
-            <div className="mt-3">
-              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Total Matched Audience:</p>
-              <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{draft.total_matched_audience}</p>
-            </div>
-          )}
+          <div className="mt-3">
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Total Matched Audience:</p>
+            <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              {draft.total_matched_audience !== undefined ? draft.total_matched_audience : draft.audiences.length}
+            </p>
+          </div>
           
           {/* Tags */}
-          {draft.campaign_tags && draft.campaign_tags.length > 0 && (
-            <div className="mt-3">
-              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Tags:</p>
+          <div className="mt-3">
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Tags:</p>
+            {draft.campaign_tags && draft.campaign_tags.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {draft.campaign_tags.map((tag, idx) => (
                   <Badge key={idx} variant="secondary" className="text-xs px-2 py-1">
@@ -304,8 +310,10 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
                   </Badge>
                 ))}
               </div>
-            </div>
-          )}
+            ) : (
+              <p className="text-xs text-gray-400 italic">No tags found</p>
+            )}
+          </div>
         </CardHeader>
       </Card>
 
@@ -328,6 +336,7 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
             variant="destructive"
             onClick={() => setShowConfirmReject(true)}
             disabled={rejecting}
+            className="bg-red-200 hover:bg-red-300 text-red-800 dark:bg-red-900/30 dark:hover:bg-red-900/50 dark:text-red-300 border border-red-300 dark:border-red-700"
           >
             {rejecting ? (
               <>
@@ -395,14 +404,14 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
                       <div className="flex items-center gap-2 mb-1">
                         <p className="font-medium truncate">{audience.audience_name}</p>
                         <Badge
-                          variant={
+                          variant="outline"
+                          className={`text-xs ${
                             audience.guardrails_tag === 'approved' || audience.guardrails_tag === 'passed'
-                              ? 'default'
+                              ? 'bg-green-100 text-green-700 border-green-300 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700'
                               : audience.guardrails_tag === 'rejected'
-                              ? 'destructive'
-                              : 'secondary'
-                          }
-                          className="text-xs"
+                              ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-300 dark:border-red-700'
+                              : 'bg-yellow-100 text-yellow-700 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-700'
+                          }`}
                         >
                           {audience.guardrails_tag === 'approved' ? 'passed' : audience.guardrails_tag}
                         </Badge>

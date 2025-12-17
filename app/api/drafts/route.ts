@@ -152,27 +152,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     let campaignCreatedAt = new Date().toISOString();
     let campaignUpdatedAt = new Date().toISOString();
     
-    // Get campaign info from campaign_status_updates metadata
-    const { data: statusUpdates, error: statusError } = await supabase
-      .schema('citia_mora_datamart')
-      .from('campaign_status_updates')
-      .select('campaign_id, message, metadata, created_at, updated_at')
-      .eq('campaign_id', latestDraftCampaignId)
-      .order('created_at', { ascending: false })
-      .limit(10);
-    
-    if (!statusError && statusUpdates && statusUpdates.length > 0) {
-      // Try to find metadata with campaign info
-      const statusWithMetadata = statusUpdates.find((s: any) => s.metadata && (s.metadata.campaign_name || s.metadata.campaign_objective));
-      if (statusWithMetadata && statusWithMetadata.metadata) {
-        campaignName = statusWithMetadata.metadata.campaign_name || 'Untitled Campaign';
-        campaignObjective = statusWithMetadata.metadata.campaign_objective || '';
-        campaignImageUrl = statusWithMetadata.metadata.campaign_image_url || null;
-      }
-      campaignCreatedAt = statusUpdates[statusUpdates.length - 1].created_at || campaignCreatedAt;
-      campaignUpdatedAt = statusUpdates[0].updated_at || campaignUpdatedAt;
-      console.log('✅ Using campaign info from campaign_status_updates metadata');
-    }
+    // Try to get campaign info from campaign table FIRST (now has SELECT permission)
+    // This is the primary source for all campaign data
     
     // Try to get campaign info from campaign table (now has SELECT permission)
     const { data: campaignTableData, error: campaignError } = await supabase
@@ -226,12 +207,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       }
       
       console.log('✅ Campaign info fetched from campaign table:', campaignTableData.id);
-      console.log('   Campaign Name:', campaignName);
+      console.log('   Campaign Name:', campaignName || 'MISSING');
       console.log('   Title from:', campaignBrief?.title ? 'meta.campaign_brief.title' : (campaignTableData.name ? 'campaign.name' : 'fallback'));
-      console.log('   Objective:', campaignObjective ? campaignObjective.substring(0, 50) + '...' : 'none');
-      console.log('   Origin Notes:', originNotes ? originNotes.substring(0, 50) + '...' : 'none');
-      console.log('   Total Matched:', totalMatchedAudience);
-      console.log('   Tags:', campaignTags.length, 'tags found');
+      console.log('   Objective:', campaignObjective ? campaignObjective.substring(0, 50) + '...' : 'MISSING');
+      console.log('   Origin Notes:', originNotes ? originNotes.substring(0, 50) + '...' : 'MISSING');
+      console.log('   Total Matched:', totalMatchedAudience || 0);
+      console.log('   Tags:', campaignTags.length, 'tags found', campaignTags);
     } else if (campaignError) {
       console.log('⚠️ Cannot access campaign table:', campaignError.code);
       console.log('   Using data from campaign_status_updates metadata instead');
@@ -320,15 +301,26 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const channel = isWhatsApp ? 'whatsapp' : isTelegram ? 'telegram' : 'whatsapp'; // Default to whatsapp
       
       // Determine "send to" value based on channel
-      // For WhatsApp: use source_contact_id (format: wa-628xxx or phone number like dummy:1)
-      // For Telegram: use telegram_username or source_contact_id
+      // For WhatsApp: use source_contact_id (format: wa-628xxx contains phone number)
+      // For Telegram: use telegram_username with @ prefix, or source_contact_id
       let sendTo = '';
       if (channel === 'whatsapp') {
-        // source_contact_id might be in format "wa-628xxx" or "dummy:1" or phone number
-        sendTo = audienceDetail.source_contact_id || '';
+        // source_contact_id might be in format "wa-628xxx" (extract phone: 628xxx) or "dummy:1"
+        // If starts with "wa-", extract the number part
+        if (audienceDetail.source_contact_id && audienceDetail.source_contact_id.startsWith('wa-')) {
+          sendTo = audienceDetail.source_contact_id.substring(3); // Remove "wa-" prefix
+        } else {
+          sendTo = audienceDetail.source_contact_id || '';
+        }
       } else if (channel === 'telegram') {
-        // Prefer telegram_username, fallback to source_contact_id
-        sendTo = audienceDetail.telegram_username || audienceDetail.source_contact_id || '';
+        // Prefer telegram_username with @ prefix, fallback to source_contact_id
+        if (audienceDetail.telegram_username) {
+          sendTo = audienceDetail.telegram_username.startsWith('@') 
+            ? audienceDetail.telegram_username 
+            : '@' + audienceDetail.telegram_username;
+        } else {
+          sendTo = audienceDetail.source_contact_id || '';
+        }
       } else {
         sendTo = audienceDetail.source_contact_id || '';
       }
