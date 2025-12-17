@@ -63,23 +63,39 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
   }, [campaignId]);
 
   const fetchDraft = async () => {
-    if (!campaignId) return;
+    if (!campaignId) {
+      console.log('⚠️ DraftOutput: No campaignId provided');
+      return;
+    }
 
     setLoading(true);
     try {
+      console.log('🔍 DraftOutput: Fetching draft for campaign:', campaignId);
       // Use API endpoint
       const response = await fetch(`/api/drafts?campaign_id=${campaignId}`);
+      console.log('📡 DraftOutput: API response status:', response.status);
+      
       if (!response.ok) {
-        throw new Error('Failed to fetch draft');
+        const errorText = await response.text();
+        console.error('❌ DraftOutput: API error:', response.status, errorText);
+        throw new Error(`Failed to fetch draft: ${response.status}`);
       }
 
       const data = await response.json();
+      console.log('📦 DraftOutput: API response data:', {
+        hasDraft: !!data.draft,
+        campaignId: data.draft?.campaign_id,
+        audiencesCount: data.draft?.audiences?.length || 0,
+      });
+      
       if (!data.draft) {
+        console.warn('⚠️ DraftOutput: No draft in response');
         setDraft(null);
         setLoading(false);
         return;
       }
 
+      console.log('✅ DraftOutput: Setting draft with', data.draft.audiences?.length || 0, 'audiences');
       setDraft(data.draft);
 
       // Auto-select first audience for detail view if none selected
