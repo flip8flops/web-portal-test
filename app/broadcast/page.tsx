@@ -115,13 +115,23 @@ export default function BroadcastPage() {
   const findLatestDraftCampaign = async (): Promise<string | null> => {
     try {
       // Use API endpoint instead of direct Supabase query (avoids 403 permission errors)
+      console.log('🔍 Calling /api/drafts to find draft campaign...');
       const response = await fetch('/api/drafts');
+      
       if (!response.ok) {
         console.warn('⚠️ Failed to fetch draft campaign from API:', response.status);
+        const errorText = await response.text().catch(() => '');
+        console.warn('⚠️ Error response:', errorText);
         return null;
       }
 
       const data = await response.json();
+      console.log('📦 API /api/drafts response:', {
+        hasDraft: !!data.draft,
+        campaignId: data.draft?.campaign_id || data.campaign_id,
+        audiencesCount: data.draft?.audiences?.length || 0,
+      });
+      
       // Check both draft.campaign_id and campaign_id (API returns both)
       const foundCampaignId = data.draft?.campaign_id || data.campaign_id;
       if (foundCampaignId) {
@@ -129,10 +139,10 @@ export default function BroadcastPage() {
         return foundCampaignId;
       }
 
-      console.log('ℹ️ No draft campaign found via API');
+      console.log('ℹ️ No draft campaign found via API - response:', data);
       return null;
     } catch (error) {
-      console.error('Error finding draft campaign:', error);
+      console.error('❌ Error finding draft campaign:', error);
       return null;
     }
   };
