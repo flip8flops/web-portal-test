@@ -205,7 +205,26 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
 
       console.log('✅ Content saved successfully');
       
-      // Refresh draft data
+      // Update local state immediately for better UX
+      if (draft) {
+        const updatedAudiences = draft.audiences.map(aud => 
+          aud.audience_id === audienceId 
+            ? { ...aud, broadcast_content: editedContent, character_count: editedContent.length }
+            : aud
+        );
+        setDraft({ ...draft, audiences: updatedAudiences });
+        
+        // Update selected audience detail if it's the one being edited
+        if (selectedAudienceDetail?.audience_id === audienceId) {
+          setSelectedAudienceDetail({
+            ...selectedAudienceDetail,
+            broadcast_content: editedContent,
+            character_count: editedContent.length,
+          });
+        }
+      }
+      
+      // Refresh draft data from server
       await fetchDraft();
 
       setEditingContent(null);
