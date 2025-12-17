@@ -49,6 +49,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // Update campaign status to rejected
+    const { error: campaignUpdateError } = await supabase
+      .schema('citia_mora_datamart')
+      .from('campaign')
+      .update({
+        status: 'rejected',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', campaign_id);
+
+    if (campaignUpdateError) {
+      console.error('Error updating campaign status:', campaignUpdateError);
+      // Don't fail if this errors, status update is more important
+    }
+
     // Update all campaign_audience records to rejected
     const { error: updateError } = await supabase
       .schema('citia_mora_datamart')

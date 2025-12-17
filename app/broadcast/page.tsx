@@ -223,8 +223,10 @@ export default function BroadcastPage() {
                 savedCampaignId = null;
               }
 
-              // First, check for latest draft campaign (regardless of localStorage)
+              // First, ALWAYS check for latest draft campaign (regardless of localStorage)
               const latestDraftId = await findLatestDraftCampaign();
+              console.log('🔍 Initial check - Latest draft campaign ID:', latestDraftId);
+              
               if (latestDraftId) {
                 const draftState = await checkCampaignState(latestDraftId);
                 console.log('📋 Found draft campaign:', latestDraftId, 'State:', draftState);
@@ -241,6 +243,7 @@ export default function BroadcastPage() {
                       localStorage.setItem('current_campaign_id', latestDraftId);
                       localStorage.setItem('current_campaign_timestamp', Date.now().toString());
                     }
+                    console.log('✅ Set draft campaign and switched to output tab');
                   } else if (draftState === 'approved' || draftState === 'rejected') {
                     // Clear draft, allow new campaign
                     setDraftCampaignId(null);
@@ -257,7 +260,10 @@ export default function BroadcastPage() {
                     setActiveTab('input');
                   }
                 }
-              } else if (savedCampaignId || savedExecutionId) {
+              }
+              
+              // Also check saved campaign if no draft found or if we want to restore processing state
+              if (savedCampaignId || savedExecutionId) {
                 // No draft found, check saved campaign
                 console.log('✅ Found saved campaign session, verifying status...');
                 
@@ -334,15 +340,55 @@ export default function BroadcastPage() {
     };
   }, []);
 
-  // Monitor campaign state changes
+  // Monitor campaign state changes and check for drafts
+  useEffect(() => {
+    const checkForDrafts = async () => {
+      // Always check for latest draft campaign on mount and periodically
+      const latestDraftId = await findLatestDraftCampaign();
+      if (latestDraftId) {
+        const draftState = await checkCampaignState(latestDraftId);
+        console.log('🔍 Periodic check - Found draft:', latestDraftId, 'State:', draftState);
+        
+        if (draftState === 'drafted') {
+          setDraftCampaignId(latestDraftId);
+          setCampaignState('drafted');
+          setCampaignId(latestDraftId);
+          if (activeTab !== 'output') {
+            setActiveTab('output');
+          }
+        } else if (draftState === 'approved' || draftState === 'rejected') {
+          setDraftCampaignId(null);
+          setCampaignState(draftState);
+          if (activeTab === 'output') {
+            setActiveTab('input');
+          }
+        }
+      } else {
+        // No draft found
+        if (campaignState === 'drafted' && !draftCampaignId) {
+          setCampaignState('idle');
+        }
+      }
+    };
+
+    checkForDrafts();
+    const interval = setInterval(checkForDrafts, 5000); // Check every 5 seconds
+
+    return () => clearInterval(interval);
+  }, []); // Run on mount and periodically, not dependent on campaignId
+
+  // Monitor specific campaign state changes
   useEffect(() => {
     if (!campaignId || campaignId === 'pending') {
-      setCampaignState('idle');
+      if (!draftCampaignId) {
+        setCampaignState('idle');
+      }
       return;
     }
 
     const checkState = async () => {
       const state = await checkCampaignState(campaignId);
+      console.log('🔍 Checking campaign state for', campaignId, '→', state);
       setCampaignState(state);
       
       if (state === 'drafted') {
@@ -703,6 +749,13 @@ export default function BroadcastPage() {
               onApproveAndSend={handleApproveAndSend}
               onReject={handleReject}
             />
+          ) : draftCampaignId ? (
+            // If we have draftCampaignId but state is not 'drafted', still try to show it
+            <DraftOutput
+              campaignId={draftCampaignId}
+              onApproveAndSend={handleApproveAndSend}
+              onReject={handleReject}
+            />
           ) : campaignState === 'approved' ? (
             <div className="space-y-4">
               <Alert className="border-green-500 bg-green-50 dark:bg-green-950">
@@ -737,6 +790,11 @@ export default function BroadcastPage() {
             <Alert>
               <AlertDescription>
                 No draft available. Generate a campaign first in the Input tab.
+                {process.env.NODE_ENV === 'development' && (
+                  <div className="mt-2 text-xs text-gray-500">
+                    Debug: campaignState={campaignState}, draftCampaignId={draftCampaignId || 'null'}, campaignId={campaignId || 'null'}
+                  </div>
+                )}
               </AlertDescription>
             </Alert>
           )}

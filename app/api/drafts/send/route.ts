@@ -147,6 +147,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Update campaign status if all sent
     const allSent = results.every(r => r.success);
     if (allSent) {
+      // Update campaign status to 'sent'
+      await supabase
+        .schema('citia_mora_datamart')
+        .from('campaign')
+        .update({
+          status: 'sent',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', campaign_id);
+
       // Insert status update: campaign approved/sent
       await supabase
         .schema('citia_mora_datamart')

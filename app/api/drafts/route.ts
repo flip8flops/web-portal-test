@@ -67,7 +67,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const { data: campaignData, error: campaignError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign')
-      .select('id, name, notes, image_url, created_at, updated_at')
+      .select('id, name, objective, image_url, created_at, updated_at')
       .eq('id', latestDraftCampaignId)
       .single();
 
@@ -88,7 +88,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         campaign_id,
         audience_id,
         broadcast_content,
-        character_count,
         meta,
         target_status,
         created_at,
@@ -135,7 +134,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         source_contact_id: audienceDetail.source_contact_id || '',
         channel: audienceDetail.wa_opt_in ? 'whatsapp' : audienceDetail.telegram_username ? 'telegram' : 'whatsapp',
         broadcast_content: item.broadcast_content || '',
-        character_count: item.character_count || 0,
+        character_count: item.broadcast_content ? item.broadcast_content.length : 0,
         guardrails_tag: guardrails.tag || 'needs_review',
         guardrails_status: guardrails.status || 'approved',
         guardrails_violations: guardrails.violations || [],
@@ -150,7 +149,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       draft: {
         campaign_id: campaignData.id,
         campaign_name: campaignData.name || 'Untitled Campaign',
-        campaign_objective: campaignData.notes,
+        campaign_objective: campaignData.objective,
         campaign_image_url: campaignData.image_url,
         audiences,
         created_at: campaignData.created_at,
