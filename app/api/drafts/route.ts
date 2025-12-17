@@ -187,27 +187,29 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     let totalMatchedAudience = 0;
 
     if (!campaignError && campaignTableData) {
-      // Override with data from campaign table if available
-      campaignName = campaignTableData.name || campaignName;
-      campaignObjective = campaignTableData.objective || campaignObjective;
-      campaignImageUrl = campaignTableData.image_url || campaignImageUrl;
-      campaignCreatedAt = campaignTableData.created_at || campaignCreatedAt;
-      campaignUpdatedAt = campaignTableData.updated_at || campaignUpdatedAt;
-      
-      // Extract additional info from meta
+      // Extract additional info from meta FIRST (before using direct fields)
       const meta = campaignTableData.meta || {};
       const researchPayload = meta.research_payload || {};
       const campaignBrief = researchPayload.campaign_brief || {};
       
-      // Get title from meta if name is not set
-      if (!campaignName && campaignBrief.title) {
+      // Get title from meta.campaign_brief.title FIRST, then fallback to campaign.name
+      if (campaignBrief && campaignBrief.title) {
         campaignName = campaignBrief.title;
+      } else {
+        campaignName = campaignTableData.name || campaignName;
       }
       
-      // Get objective from meta if not set
-      if (!campaignObjective && campaignBrief.objective) {
+      // Get objective from meta.campaign_brief.objective FIRST, then fallback to campaign.objective
+      if (campaignBrief && campaignBrief.objective) {
         campaignObjective = campaignBrief.objective;
+      } else {
+        campaignObjective = campaignTableData.objective || campaignObjective;
       }
+      
+      // Get other fields
+      campaignImageUrl = campaignTableData.image_url || campaignImageUrl;
+      campaignCreatedAt = campaignTableData.created_at || campaignCreatedAt;
+      campaignUpdatedAt = campaignTableData.updated_at || campaignUpdatedAt;
       
       // Get origin notes
       originNotes = meta.origin_raw_admin_notes || '';
@@ -219,11 +221,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // Get tags from matchmaker_strategy or meta
       if (campaignTableData.matchmaker_strategy && campaignTableData.matchmaker_strategy.tags) {
         campaignTags = campaignTableData.matchmaker_strategy.tags;
-      } else if (campaignBrief.tags) {
+      } else if (campaignBrief && campaignBrief.tags) {
         campaignTags = campaignBrief.tags;
       }
       
       console.log('✅ Campaign info fetched from campaign table:', campaignTableData.id, campaignName);
+      console.log('   Title from:', campaignBrief?.title ? 'meta.campaign_brief.title' : 'campaign.name');
+      console.log('   Tags:', campaignTags.length, 'tags found');
     } else if (campaignError) {
       console.log('⚠️ Cannot access campaign table:', campaignError.code);
       console.log('   Using data from campaign_status_updates metadata instead');
@@ -319,6 +323,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         sendTo = audienceDetail.source_contact_id || '';
       }
 
+      // Map guardrails tag: 'approved' -> 'passed'
+      let guardrailsTag = guardrails.tag || 'needs_review';
+      if (guardrailsTag === 'approved') {
+        guardrailsTag = 'passed';
+      }
+
       return {
         campaign_id: item.campaign_id,
         audience_id: item.audience_id,
@@ -326,11 +336,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         source_contact_id: audienceDetail.source_contact_id || '',
         phone_number: audienceDetail.phone_number || '',
         telegram_username: audienceDetail.telegram_username || '',
-        send_to: sendTo,
+        send_to: sendTo || audienceDetail.source_contact_id || 'Unknown',
         channel: channel,
         broadcast_content: item.broadcast_content || '',
         character_count: item.broadcast_content ? item.broadcast_content.length : 0,
-        guardrails_tag: guardrails.tag || 'needs_review',
+        guardrails_tag: guardrailsTag,
         guardrails_status: guardrails.status || 'approved',
         guardrails_violations: guardrails.violations || [],
         matchmaker_reason: meta.matchmaker_reason,

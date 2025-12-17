@@ -224,8 +224,8 @@ export default function BroadcastPage() {
                   if (draftState === 'drafted') {
                     console.log('✅ Setting draft campaign');
                     // Don't auto-switch tabs - let user stay where they are
-                    // Only switch if we're coming from a fresh page load
-                    if (!savedCampaignId && !savedExecutionId) {
+                    // Only switch on fresh page load (no saved state)
+                    if (!savedCampaignId && !savedExecutionId && !mounted) {
                       // Fresh load - switch to output to show draft
                       setActiveTab('output');
                     }
@@ -239,7 +239,10 @@ export default function BroadcastPage() {
                     console.log('⚠️ Draft campaign is', draftState, '- clearing');
                     setDraftCampaignId(null);
                     setCampaignId(null);
-                    setActiveTab('input');
+                    // Only switch if currently on output tab
+                    if (activeTab === 'output') {
+                      setActiveTab('input');
+                    }
                     if (typeof window !== 'undefined' && window.localStorage) {
                       localStorage.removeItem('current_campaign_id');
                       localStorage.removeItem('current_execution_id');
@@ -248,12 +251,15 @@ export default function BroadcastPage() {
                   } else if (draftState === 'processing') {
                     // Still processing - show status in input tab
                     console.log('⏳ Draft campaign is still processing');
-                    setActiveTab('input');
+                    // Only switch if currently on output tab
+                    if (activeTab === 'output') {
+                      setActiveTab('input');
+                    }
                   } else {
-                    // Unknown state, but we have a draft campaign - assume drafted and show in output
-                    console.log('⚠️ Unknown draft state (' + draftState + '), assuming drafted - showing in output');
+                    // Unknown state, but we have a draft campaign - assume drafted
+                    console.log('⚠️ Unknown draft state (' + draftState + '), assuming drafted');
                     setCampaignState('drafted');
-                    setActiveTab('output');
+                    // Don't auto-switch - let user stay where they are
                   }
                 }
               } else {
@@ -368,9 +374,7 @@ export default function BroadcastPage() {
           // Unknown state - assume drafted
           console.log('⚠️ Unknown draft state in periodic check (' + draftState + '), assuming drafted');
           setCampaignState('drafted');
-          if (activeTab !== 'output') {
-            setActiveTab('output');
-          }
+          // Don't auto-switch tabs - let user stay where they are
         }
       } else {
         // No draft found - clear state if we had one

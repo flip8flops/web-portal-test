@@ -405,11 +405,7 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
                 <div className="space-y-2">
                   <div>
                     <p className="text-sm font-medium text-gray-500">Send To</p>
-                    <p className="text-base">{selectedAudienceDetail.audience_name}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-500">Send To</p>
-                    <p className="text-base">{selectedAudienceDetail.send_to || selectedAudienceDetail.source_contact_id}</p>
+                    <p className="text-base">{selectedAudienceDetail.send_to || selectedAudienceDetail.source_contact_id || 'Unknown'}</p>
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-500">Channel</p>
