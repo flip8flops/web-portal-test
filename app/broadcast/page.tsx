@@ -224,11 +224,7 @@ export default function BroadcastPage() {
                   if (draftState === 'drafted') {
                     console.log('✅ Setting draft campaign');
                     // Don't auto-switch tabs - let user stay where they are
-                    // Only switch on fresh page load (no saved state)
-                    if (!savedCampaignId && !savedExecutionId && !mounted) {
-                      // Fresh load - switch to output to show draft
-                      setActiveTab('output');
-                    }
+                    // User can manually switch to output tab if they want to see the draft
                     // Save to localStorage
                     if (typeof window !== 'undefined' && window.localStorage) {
                       localStorage.setItem('current_campaign_id', latestDraftId);
