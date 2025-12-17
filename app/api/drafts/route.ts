@@ -44,49 +44,79 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (!latestDraftCampaignId) {
       console.log('🔍 Querying for draft campaign...');
       
-      // Approach: Use campaign_status_updates first (same as StatusDisplay component)
-      // This works because StatusDisplay successfully queries this table
-      console.log('🔍 Step 1: Querying campaign_status_updates for cpgDrafted message...');
+      // Approach: Query campaign_status_updates by agent_name and status (same as StatusDisplay)
+      // Look for content_maker_agent with status='completed' which indicates draft is ready
+      // This matches how StatusDisplay successfully queries this table
+      console.log('🔍 Step 1: Querying campaign_status_updates for content_maker_agent completed...');
       const { data: statusData, error: statusError } = await supabase
         .schema('citia_mora_datamart')
         .from('campaign_status_updates')
-        .select('campaign_id, message, updated_at')
-        .ilike('message', '%cpgDrafted%')
+        .select('campaign_id, agent_name, status, message, updated_at, metadata')
+        .eq('agent_name', 'content_maker_agent')
+        .eq('status', 'completed')
         .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(10); // Get multiple to find the latest one
 
       if (statusError) {
         console.error('❌ Error querying campaign_status_updates:', statusError);
         console.error('❌ Error code:', statusError.code);
         console.error('❌ Error message:', statusError.message);
-      } else if (statusData && statusData.campaign_id) {
-        latestDraftCampaignId = statusData.campaign_id;
-        console.log('✅ Found draft campaign from campaign_status_updates:', latestDraftCampaignId);
-      } else {
-        console.log('ℹ️ No cpgDrafted message found, trying to find by campaign.status...');
-        
-        // Fallback: Try direct query to campaign table
-        // Note: This might fail with permission error, but we'll try anyway
-        const { data: campaignData, error: campaignError } = await supabase
-          .schema('citia_mora_datamart')
-          .from('campaign')
-          .select('id, status, updated_at')
-          .eq('status', 'content_drafted')
-          .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (campaignError) {
-          console.error('❌ Error querying campaign table:', campaignError);
-          console.error('❌ Error code:', campaignError.code);
-          console.error('❌ Error message:', campaignError.message);
-          console.log('⚠️ Permission error on campaign table - this is expected if RLS is strict');
-        } else if (campaignData && campaignData.id) {
-          latestDraftCampaignId = campaignData.id;
-          console.log('✅ Found draft campaign from campaign.status:', latestDraftCampaignId);
+      } else if (statusData && statusData.length > 0) {
+        // Find the latest one that has a valid campaign_id
+        const latestStatus = statusData.find((s: any) => s.campaign_id);
+        if (latestStatus && latestStatus.campaign_id) {
+          latestDraftCampaignId = latestStatus.campaign_id;
+          console.log('✅ Found draft campaign from campaign_status_updates:', latestDraftCampaignId);
         } else {
-          console.log('ℹ️ No campaign found with status="content_drafted"');
+          console.log('ℹ️ Found status updates but no valid campaign_id');
+        }
+      } else {
+        console.log('ℹ️ No content_maker_agent completed status found, trying alternative approach...');
+        
+        // Alternative: Query all recent status updates and find one with workflow_point indicating draft
+        const { data: altStatusData, error: altStatusError } = await supabase
+          .schema('citia_mora_datamart')
+          .from('campaign_status_updates')
+          .select('campaign_id, agent_name, status, message, updated_at, metadata')
+          .order('updated_at', { ascending: false })
+          .limit(50);
+        
+        if (!altStatusError && altStatusData && altStatusData.length > 0) {
+          // Look for status update with metadata.workflow_point = 'content_maker_completed'
+          const draftStatus = altStatusData.find((s: any) => {
+            const metadata = s.metadata || {};
+            return metadata.workflow_point === 'content_maker_completed' && s.campaign_id;
+          });
+          
+          if (draftStatus && draftStatus.campaign_id) {
+            latestDraftCampaignId = draftStatus.campaign_id;
+            console.log('✅ Found draft campaign from workflow_point metadata:', latestDraftCampaignId);
+          }
+        }
+        
+        // Final fallback: Try direct query to campaign table (may fail with permission error)
+        if (!latestDraftCampaignId) {
+          console.log('ℹ️ Trying to find by campaign.status...');
+          const { data: campaignData, error: campaignError } = await supabase
+            .schema('citia_mora_datamart')
+            .from('campaign')
+            .select('id, status, updated_at')
+            .eq('status', 'content_drafted')
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (campaignError) {
+            console.error('❌ Error querying campaign table:', campaignError);
+            console.error('❌ Error code:', campaignError.code);
+            console.error('❌ Error message:', campaignError.message);
+            console.log('⚠️ Permission error on campaign table - check Supabase grants');
+          } else if (campaignData && campaignData.id) {
+            latestDraftCampaignId = campaignData.id;
+            console.log('✅ Found draft campaign from campaign.status:', latestDraftCampaignId);
+          } else {
+            console.log('ℹ️ No campaign found with status="content_drafted"');
+          }
         }
       }
     }
@@ -112,18 +142,39 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     console.log('✅ Using draft campaign ID:', latestDraftCampaignId);
 
     // Get campaign info
-    // Try to get campaign info from campaign_status_updates first (which we know works)
+    // campaign table doesn't have SELECT permission for anon role
+    // So we'll get info from campaign_status_updates metadata (which we know works)
     console.log('🔍 Fetching campaign info for ID:', latestDraftCampaignId);
     
-    // First, try to get campaign info from campaign_status_updates (which we know has access)
-    let campaignData: any = null;
     let campaignName = 'Untitled Campaign';
     let campaignObjective = '';
     let campaignImageUrl = null;
     let campaignCreatedAt = new Date().toISOString();
     let campaignUpdatedAt = new Date().toISOString();
     
-    // Try to get campaign info from campaign table
+    // Get campaign info from campaign_status_updates metadata
+    const { data: statusUpdates, error: statusError } = await supabase
+      .schema('citia_mora_datamart')
+      .from('campaign_status_updates')
+      .select('campaign_id, message, metadata, created_at, updated_at')
+      .eq('campaign_id', latestDraftCampaignId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    
+    if (!statusError && statusUpdates && statusUpdates.length > 0) {
+      // Try to find metadata with campaign info
+      const statusWithMetadata = statusUpdates.find((s: any) => s.metadata && (s.metadata.campaign_name || s.metadata.campaign_objective));
+      if (statusWithMetadata && statusWithMetadata.metadata) {
+        campaignName = statusWithMetadata.metadata.campaign_name || 'Untitled Campaign';
+        campaignObjective = statusWithMetadata.metadata.campaign_objective || '';
+        campaignImageUrl = statusWithMetadata.metadata.campaign_image_url || null;
+      }
+      campaignCreatedAt = statusUpdates[statusUpdates.length - 1].created_at || campaignCreatedAt;
+      campaignUpdatedAt = statusUpdates[0].updated_at || campaignUpdatedAt;
+      console.log('✅ Using campaign info from campaign_status_updates metadata');
+    }
+    
+    // Try to get campaign info from campaign table (may fail due to permissions)
     const { data: campaignTableData, error: campaignError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign')
@@ -131,45 +182,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .eq('id', latestDraftCampaignId)
       .single();
 
-    if (campaignError) {
-      console.error('❌ Error fetching campaign from campaign table:', campaignError);
-      console.error('❌ Error code:', campaignError.code);
-      console.error('❌ Error message:', campaignError.message);
-      console.log('⚠️ Cannot access campaign table, will use campaign_status_updates data instead');
-      
-      // Fallback: Get campaign info from campaign_status_updates
-      // We'll use the campaign_id and try to infer other info from status updates
-      const { data: statusUpdates, error: statusError } = await supabase
-        .schema('citia_mora_datamart')
-        .from('campaign_status_updates')
-        .select('campaign_id, message, metadata, created_at, updated_at')
-        .eq('campaign_id', latestDraftCampaignId)
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      
-      if (!statusError && statusUpdates) {
-        campaignName = statusUpdates.metadata?.campaign_name || 'Untitled Campaign';
-        campaignObjective = statusUpdates.metadata?.campaign_objective || '';
-        campaignImageUrl = statusUpdates.metadata?.campaign_image_url || null;
-        campaignCreatedAt = statusUpdates.created_at || campaignCreatedAt;
-        campaignUpdatedAt = statusUpdates.updated_at || campaignUpdatedAt;
-        console.log('✅ Using campaign info from campaign_status_updates');
-      }
-    } else if (campaignTableData) {
-      campaignData = campaignTableData;
-      campaignName = campaignTableData.name || 'Untitled Campaign';
-      campaignObjective = campaignTableData.objective || '';
-      campaignImageUrl = campaignTableData.image_url;
-      campaignCreatedAt = campaignTableData.created_at;
-      campaignUpdatedAt = campaignTableData.updated_at;
-      console.log('✅ Campaign info fetched from campaign table:', campaignData.id, campaignData.name);
-    } else {
-      console.error('❌ Campaign data is null for ID:', latestDraftCampaignId);
-      return NextResponse.json(
-        { error: 'Campaign not found' },
-        { status: 404 }
-      );
+    if (!campaignError && campaignTableData) {
+      // Override with data from campaign table if available
+      campaignName = campaignTableData.name || campaignName;
+      campaignObjective = campaignTableData.objective || campaignObjective;
+      campaignImageUrl = campaignTableData.image_url || campaignImageUrl;
+      campaignCreatedAt = campaignTableData.created_at || campaignCreatedAt;
+      campaignUpdatedAt = campaignTableData.updated_at || campaignUpdatedAt;
+      console.log('✅ Campaign info also fetched from campaign table:', campaignTableData.id, campaignTableData.name);
+    } else if (campaignError) {
+      console.log('⚠️ Cannot access campaign table (expected):', campaignError.code);
+      console.log('   Using data from campaign_status_updates metadata instead');
     }
 
     // Get campaign audiences with broadcast_content
