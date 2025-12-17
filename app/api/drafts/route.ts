@@ -4,13 +4,24 @@ import { createClient } from '@supabase/supabase-js';
 export const dynamic = 'force-dynamic';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL!;
+// Prefer service role key for API endpoints (bypasses RLS)
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!;
 
 if (!supabaseUrl || !supabaseServiceKey) {
-  console.error('Missing Supabase configuration');
+  console.error('❌ Missing Supabase configuration');
+  console.error('   NEXT_PUBLIC_SUPABASE_URL:', supabaseUrl ? 'SET' : 'MISSING');
+  console.error('   SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SET' : 'MISSING');
+  console.error('   SUPABASE_ANON_KEY (fallback):', process.env.SUPABASE_ANON_KEY ? 'SET' : 'MISSING');
 }
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+// Use service role key if available, otherwise fallback to anon key
+// Service role key bypasses RLS and has full access
+const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+  },
+});
 
 /**
  * GET /api/drafts
@@ -18,14 +29,22 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
+    console.log('🔍 GET /api/drafts - Starting...');
+    console.log('🔍 Supabase URL:', supabaseUrl ? `${supabaseUrl.substring(0, 30)}...` : 'MISSING');
+    console.log('🔍 Service Key:', supabaseServiceKey ? `${supabaseServiceKey.substring(0, 20)}...` : 'MISSING');
+    
     const searchParams = request.nextUrl.searchParams;
     const campaignId = searchParams.get('campaign_id');
+    console.log('🔍 Request campaign_id param:', campaignId || 'none');
 
     // Find latest campaign with status "content_drafted"
     let latestDraftCampaignId = campaignId;
 
     if (!latestDraftCampaignId) {
-      // First, try to find from campaign.status = 'content_drafted'
+      console.log('🔍 Querying campaign table for status="content_drafted"...');
+      
+      // Try multiple approaches to find draft campaign
+      // Approach 1: Direct query to campaign table
       const { data: campaignData, error: campaignError } = await supabase
         .schema('citia_mora_datamart')
         .from('campaign')
@@ -35,11 +54,25 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         .limit(1)
         .maybeSingle();
 
-      if (!campaignError && campaignData) {
+      if (campaignError) {
+        console.error('❌ Error querying campaign table:', campaignError);
+        console.error('❌ Error code:', campaignError.code);
+        console.error('❌ Error message:', campaignError.message);
+        console.error('❌ Error hint:', campaignError.hint);
+        
+        // If permission error, try fallback
+        if (campaignError.code === '42501' || campaignError.message?.includes('permission')) {
+          console.log('⚠️ Permission error detected, trying campaign_status_updates...');
+        }
+      }
+
+      if (!campaignError && campaignData && campaignData.id) {
         latestDraftCampaignId = campaignData.id;
         console.log('✅ Found draft campaign from campaign.status:', latestDraftCampaignId);
       } else {
-        // Fallback: check campaign_status_updates with message cpgDrafted
+        console.log('ℹ️ No campaign found with status="content_drafted", trying campaign_status_updates...');
+        
+        // Approach 2: Check campaign_status_updates with message cpgDrafted
         const { data: statusData, error: statusError } = await supabase
           .schema('citia_mora_datamart')
           .from('campaign_status_updates')
@@ -49,14 +82,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           .limit(1)
           .maybeSingle();
 
-        if (!statusError && statusData) {
+        if (statusError) {
+          console.error('❌ Error querying campaign_status_updates:', statusError);
+        }
+
+        if (!statusError && statusData && statusData.campaign_id) {
           latestDraftCampaignId = statusData.campaign_id;
           console.log('✅ Found draft campaign from campaign_status_updates:', latestDraftCampaignId);
+        } else {
+          console.log('ℹ️ No draft campaign found in campaign_status_updates either');
         }
       }
     }
 
     if (!latestDraftCampaignId) {
+      console.log('⚠️ No draft campaign ID found, returning null');
       return NextResponse.json({
         draft: null,
         campaign_id: null,
@@ -64,7 +104,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       });
     }
 
+    console.log('✅ Using draft campaign ID:', latestDraftCampaignId);
+
     // Get campaign info
+    console.log('🔍 Fetching campaign info for ID:', latestDraftCampaignId);
     const { data: campaignData, error: campaignError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign')
@@ -73,15 +116,27 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .single();
 
     if (campaignError) {
-      console.error('Error fetching campaign:', campaignError);
+      console.error('❌ Error fetching campaign:', campaignError);
+      console.error('❌ Error code:', campaignError.code);
+      console.error('❌ Error message:', campaignError.message);
       return NextResponse.json(
-        { error: 'Failed to fetch campaign' },
+        { error: 'Failed to fetch campaign', details: campaignError.message },
         { status: 500 }
       );
     }
 
+    if (!campaignData) {
+      console.error('❌ Campaign data is null for ID:', latestDraftCampaignId);
+      return NextResponse.json(
+        { error: 'Campaign not found' },
+        { status: 404 }
+      );
+    }
+
+    console.log('✅ Campaign info fetched:', campaignData.id, campaignData.name);
+
     // Get campaign audiences with broadcast_content
-    // Use RPC or separate queries since Supabase doesn't support direct joins across schemas easily
+    console.log('🔍 Fetching campaign audiences with broadcast_content...');
     const { data: audienceData, error: audienceError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign_audience')
@@ -99,12 +154,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .neq('broadcast_content', '');
 
     if (audienceError) {
-      console.error('Error fetching audiences:', audienceError);
+      console.error('❌ Error fetching audiences:', audienceError);
+      console.error('❌ Error code:', audienceError.code);
+      console.error('❌ Error message:', audienceError.message);
       return NextResponse.json(
-        { error: 'Failed to fetch audiences' },
+        { error: 'Failed to fetch audiences', details: audienceError.message },
         { status: 500 }
       );
     }
+
+    console.log('✅ Found', audienceData?.length || 0, 'audiences with broadcast_content');
 
     // Get audience details separately
     const audienceIds = (audienceData || []).map((item: any) => item.audience_id);
@@ -146,6 +205,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       };
     });
 
+    console.log('✅ Returning draft data with', audiences.length, 'audiences');
+    
     return NextResponse.json({
       draft: {
         campaign_id: campaignData.id,

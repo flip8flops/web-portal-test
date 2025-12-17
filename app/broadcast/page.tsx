@@ -241,12 +241,13 @@ export default function BroadcastPage() {
                       localStorage.removeItem('current_campaign_timestamp');
                     }
                   } else if (draftState === 'processing') {
-                    // Still processing
+                    // Still processing - show status in input tab
                     console.log('⏳ Draft campaign is still processing');
                     setActiveTab('input');
                   } else {
-                    // Unknown state, but we have a draft campaign - show it
-                    console.log('⚠️ Unknown draft state, but campaign exists - showing in output');
+                    // Unknown state, but we have a draft campaign - assume drafted and show in output
+                    console.log('⚠️ Unknown draft state (' + draftState + '), assuming drafted - showing in output');
+                    setCampaignState('drafted');
                     setActiveTab('output');
                   }
                 }
@@ -356,6 +357,13 @@ export default function BroadcastPage() {
         } else if (draftState === 'processing') {
           if (activeTab !== 'input') {
             setActiveTab('input');
+          }
+        } else {
+          // Unknown state - assume drafted
+          console.log('⚠️ Unknown draft state in periodic check (' + draftState + '), assuming drafted');
+          setCampaignState('drafted');
+          if (activeTab !== 'output') {
+            setActiveTab('output');
           }
         }
       } else {
@@ -744,16 +752,9 @@ export default function BroadcastPage() {
                 </AlertDescription>
               </Alert>
             </div>
-          ) : campaignState === 'drafted' && draftCampaignId ? (
+          ) : (campaignState === 'drafted' || draftCampaignId) ? (
             <DraftOutput
-              campaignId={draftCampaignId}
-              onApproveAndSend={handleApproveAndSend}
-              onReject={handleReject}
-            />
-          ) : draftCampaignId ? (
-            // If we have draftCampaignId but state is not 'drafted', still try to show it
-            <DraftOutput
-              campaignId={draftCampaignId}
+              campaignId={draftCampaignId || campaignId}
               onApproveAndSend={handleApproveAndSend}
               onReject={handleReject}
             />
@@ -791,11 +792,6 @@ export default function BroadcastPage() {
             <Alert>
               <AlertDescription>
                 No draft available. Generate a campaign first in the Input tab.
-                {process.env.NODE_ENV === 'development' && (
-                  <div className="mt-2 text-xs text-gray-500">
-                    Debug: campaignState={campaignState}, draftCampaignId={draftCampaignId || 'null'}, campaignId={campaignId || 'null'}
-                  </div>
-                )}
               </AlertDescription>
             </Alert>
           )}
