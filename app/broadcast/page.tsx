@@ -222,8 +222,13 @@ export default function BroadcastPage() {
                   setCampaignId(latestDraftId);
                   
                   if (draftState === 'drafted') {
-                    console.log('✅ Setting draft campaign and switching to output tab');
-                    setActiveTab('output');
+                    console.log('✅ Setting draft campaign');
+                    // Don't auto-switch tabs - let user stay where they are
+                    // Only switch if we're coming from a fresh page load
+                    if (!savedCampaignId && !savedExecutionId) {
+                      // Fresh load - switch to output to show draft
+                      setActiveTab('output');
+                    }
                     // Save to localStorage
                     if (typeof window !== 'undefined' && window.localStorage) {
                       localStorage.setItem('current_campaign_id', latestDraftId);
@@ -339,10 +344,11 @@ export default function BroadcastPage() {
         // IMPORTANT: Always set campaignId so StatusDisplay can show status
         setCampaignId(latestDraftId);
         
+        // Don't auto-switch tabs - let user stay on their current tab
+        // Only switch if no tab is active or if explicitly needed
         if (draftState === 'drafted') {
-          if (activeTab !== 'output') {
-            setActiveTab('output');
-          }
+          // Don't force switch - user might want to stay on input tab
+          // Only switch if we're in an invalid state
         } else if (draftState === 'approved' || draftState === 'rejected') {
           setDraftCampaignId(null);
           setCampaignId(null);

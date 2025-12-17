@@ -174,13 +174,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       console.log('✅ Using campaign info from campaign_status_updates metadata');
     }
     
-    // Try to get campaign info from campaign table (may fail due to permissions)
+    // Try to get campaign info from campaign table (now has SELECT permission)
     const { data: campaignTableData, error: campaignError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign')
-      .select('id, name, objective, image_url, created_at, updated_at')
+      .select('id, name, objective, image_url, meta, matchmaker_strategy, created_at, updated_at')
       .eq('id', latestDraftCampaignId)
       .single();
+
+    let campaignTags: string[] = [];
+    let originNotes = '';
+    let totalMatchedAudience = 0;
 
     if (!campaignError && campaignTableData) {
       // Override with data from campaign table if available
@@ -189,9 +193,39 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       campaignImageUrl = campaignTableData.image_url || campaignImageUrl;
       campaignCreatedAt = campaignTableData.created_at || campaignCreatedAt;
       campaignUpdatedAt = campaignTableData.updated_at || campaignUpdatedAt;
-      console.log('✅ Campaign info also fetched from campaign table:', campaignTableData.id, campaignTableData.name);
+      
+      // Extract additional info from meta
+      const meta = campaignTableData.meta || {};
+      const researchPayload = meta.research_payload || {};
+      const campaignBrief = researchPayload.campaign_brief || {};
+      
+      // Get title from meta if name is not set
+      if (!campaignName && campaignBrief.title) {
+        campaignName = campaignBrief.title;
+      }
+      
+      // Get objective from meta if not set
+      if (!campaignObjective && campaignBrief.objective) {
+        campaignObjective = campaignBrief.objective;
+      }
+      
+      // Get origin notes
+      originNotes = meta.origin_raw_admin_notes || '';
+      
+      // Get total matched audience
+      const matchmakerResult = meta.matchmaker_result || {};
+      totalMatchedAudience = matchmakerResult.total_matched || 0;
+      
+      // Get tags from matchmaker_strategy or meta
+      if (campaignTableData.matchmaker_strategy && campaignTableData.matchmaker_strategy.tags) {
+        campaignTags = campaignTableData.matchmaker_strategy.tags;
+      } else if (campaignBrief.tags) {
+        campaignTags = campaignBrief.tags;
+      }
+      
+      console.log('✅ Campaign info fetched from campaign table:', campaignTableData.id, campaignName);
     } else if (campaignError) {
-      console.log('⚠️ Cannot access campaign table (expected):', campaignError.code);
+      console.log('⚠️ Cannot access campaign table:', campaignError.code);
       console.log('   Using data from campaign_status_updates metadata instead');
     }
 
@@ -217,7 +251,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       console.error('❌ Error fetching audiences:', audienceError);
       console.error('❌ Error code:', audienceError.code);
       console.error('❌ Error message:', audienceError.message);
-      console.log('⚠️ Cannot access campaign_audience table, returning minimal data');
+      console.log('⚠️ Cannot access campaign_audience table (expected due to permissions)');
+      console.log('⚠️ Please run grant-supabase-permissions.sql to grant SELECT permission');
       
       // Return minimal data with campaign_id at least
       return NextResponse.json({
@@ -231,7 +266,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           updated_at: campaignUpdatedAt,
         },
         campaign_id: latestDraftCampaignId,
-        warning: 'Could not fetch audiences due to permission error. Please check database permissions.',
+        warning: 'Could not fetch audiences due to permission error. Please run grant-supabase-permissions.sql to grant SELECT permission on campaign_audience and audience tables.',
       });
     }
 
@@ -246,7 +281,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const { data: detailsData, error: detailsError } = await supabase
         .schema('citia_mora_datamart')
         .from('audience')
-        .select('id, full_name, source_contact_id, wa_opt_in, telegram_username')
+        .select('id, full_name, source_contact_id, wa_opt_in, telegram_username, phone_number')
         .in('id', audienceIds);
 
       if (detailsError) {
@@ -257,19 +292,42 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         console.log('✅ Fetched', audienceDetails.length, 'audience details');
       }
     }
+    
+    // Update total matched audience if we have actual count
+    if (totalMatchedAudience === 0 && audienceData && audienceData.length > 0) {
+      totalMatchedAudience = audienceData.length;
+    }
 
     // Combine data
     const audiences = (audienceData || []).map((item: any) => {
       const audienceDetail = audienceDetails.find((a: any) => a.id === item.audience_id) || {};
       const meta = item.meta || {};
       const guardrails = meta.guardrails || {};
+      
+      // Determine channel
+      const isWhatsApp = audienceDetail.wa_opt_in;
+      const isTelegram = !!audienceDetail.telegram_username;
+      const channel = isWhatsApp ? 'whatsapp' : isTelegram ? 'telegram' : 'whatsapp';
+      
+      // Determine "send to" value based on channel
+      let sendTo = '';
+      if (channel === 'whatsapp') {
+        sendTo = audienceDetail.phone_number || audienceDetail.source_contact_id || '';
+      } else if (channel === 'telegram') {
+        sendTo = audienceDetail.telegram_username || audienceDetail.source_contact_id || '';
+      } else {
+        sendTo = audienceDetail.source_contact_id || '';
+      }
 
       return {
         campaign_id: item.campaign_id,
         audience_id: item.audience_id,
         audience_name: audienceDetail.full_name || audienceDetail.source_contact_id || 'Unknown',
         source_contact_id: audienceDetail.source_contact_id || '',
-        channel: audienceDetail.wa_opt_in ? 'whatsapp' : audienceDetail.telegram_username ? 'telegram' : 'whatsapp',
+        phone_number: audienceDetail.phone_number || '',
+        telegram_username: audienceDetail.telegram_username || '',
+        send_to: sendTo,
+        channel: channel,
         broadcast_content: item.broadcast_content || '',
         character_count: item.broadcast_content ? item.broadcast_content.length : 0,
         guardrails_tag: guardrails.tag || 'needs_review',
@@ -290,6 +348,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         campaign_name: campaignName,
         campaign_objective: campaignObjective,
         campaign_image_url: campaignImageUrl,
+        campaign_tags: campaignTags,
+        origin_notes: originNotes,
+        total_matched_audience: totalMatchedAudience,
         audiences,
         created_at: campaignCreatedAt,
         updated_at: campaignUpdatedAt,

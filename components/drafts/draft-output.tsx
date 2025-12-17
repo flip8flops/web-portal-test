@@ -12,10 +12,13 @@ interface DraftAudience {
   audience_id: string;
   audience_name: string;
   source_contact_id: string;
+  phone_number?: string;
+  telegram_username?: string;
+  send_to: string;
   channel: string;
   broadcast_content: string;
   character_count: number;
-  guardrails_tag: 'approved' | 'needs_review' | 'rejected';
+  guardrails_tag: 'approved' | 'needs_review' | 'rejected' | 'passed';
   guardrails_violations: any[];
   matchmaker_reason?: any;
   campaign_objective?: string;
@@ -27,6 +30,9 @@ interface DraftCampaign {
   campaign_name?: string;
   campaign_objective?: string;
   campaign_image_url?: string;
+  campaign_tags?: string[];
+  origin_notes?: string;
+  total_matched_audience?: number;
   audiences: DraftAudience[];
   created_at: string;
   updated_at: string;
@@ -176,23 +182,30 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
     if (!draft) return;
 
     try {
-      // Update broadcast_content in database
-      const { error } = await supabase
-        .schema('citia_mora_datamart')
-        .from('campaign_audience')
-        .update({
+      console.log('💾 Saving edited content for audience:', audienceId);
+      
+      // Update broadcast_content in database via API endpoint
+      const response = await fetch('/api/drafts/update-content', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          campaign_id: draft.campaign_id,
+          audience_id: audienceId,
           broadcast_content: editedContent,
-          character_count: editedContent.length,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('campaign_id', draft.campaign_id)
-        .eq('audience_id', audienceId);
+        }),
+      });
 
-      if (error) {
-        console.error('Error updating content:', error);
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Error updating content:', errorData);
+        alert('Failed to save changes: ' + (errorData.error || 'Unknown error'));
         return;
       }
 
+      console.log('✅ Content saved successfully');
+      
       // Refresh draft data
       await fetchDraft();
 
@@ -200,6 +213,7 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
       setEditedContent('');
     } catch (error) {
       console.error('Error saving edit:', error);
+      alert('Failed to save changes. Please try again.');
     }
   };
 
@@ -231,12 +245,39 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
       {/* Campaign Info */}
       <Card>
         <CardHeader>
-          <CardTitle>{draft.campaign_name}</CardTitle>
+          <CardTitle className="text-2xl">{draft.campaign_name || 'Untitled Campaign'}</CardTitle>
           {draft.campaign_objective && (
             <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
               {draft.campaign_objective}
             </p>
           )}
+          <div className="mt-4 space-y-2">
+            {draft.origin_notes && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Origin Notes:</p>
+                <p className="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 p-2 rounded">
+                  {draft.origin_notes}
+                </p>
+              </div>
+            )}
+            <div className="flex items-center gap-4 text-sm">
+              {draft.total_matched_audience !== undefined && (
+                <div>
+                  <span className="text-gray-500 dark:text-gray-400">Total Matched Audience: </span>
+                  <span className="font-semibold">{draft.total_matched_audience}</span>
+                </div>
+              )}
+            </div>
+            {draft.campaign_tags && draft.campaign_tags.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {draft.campaign_tags.map((tag, idx) => (
+                  <Badge key={idx} variant="secondary" className="text-xs">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
         </CardHeader>
       </Card>
 
@@ -327,7 +368,7 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
                         <p className="font-medium truncate">{audience.audience_name}</p>
                         <Badge
                           variant={
-                            audience.guardrails_tag === 'approved'
+                            audience.guardrails_tag === 'approved' || audience.guardrails_tag === 'passed'
                               ? 'default'
                               : audience.guardrails_tag === 'rejected'
                               ? 'destructive'
@@ -335,7 +376,7 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
                           }
                           className="text-xs"
                         >
-                          {audience.guardrails_tag}
+                          {audience.guardrails_tag === 'approved' ? 'passed' : audience.guardrails_tag}
                         </Badge>
                       </div>
                       <p className="text-xs text-gray-500 truncate">
@@ -367,8 +408,8 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
                     <p className="text-base">{selectedAudienceDetail.audience_name}</p>
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-500">Phone Number</p>
-                    <p className="text-base">{selectedAudienceDetail.source_contact_id}</p>
+                    <p className="text-sm font-medium text-gray-500">Send To</p>
+                    <p className="text-base">{selectedAudienceDetail.send_to || selectedAudienceDetail.source_contact_id}</p>
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-500">Channel</p>
