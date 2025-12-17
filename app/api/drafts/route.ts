@@ -225,8 +225,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         campaignTags = campaignBrief.tags;
       }
       
-      console.log('✅ Campaign info fetched from campaign table:', campaignTableData.id, campaignName);
-      console.log('   Title from:', campaignBrief?.title ? 'meta.campaign_brief.title' : 'campaign.name');
+      console.log('✅ Campaign info fetched from campaign table:', campaignTableData.id);
+      console.log('   Campaign Name:', campaignName);
+      console.log('   Title from:', campaignBrief?.title ? 'meta.campaign_brief.title' : (campaignTableData.name ? 'campaign.name' : 'fallback'));
+      console.log('   Objective:', campaignObjective ? campaignObjective.substring(0, 50) + '...' : 'none');
+      console.log('   Origin Notes:', originNotes ? originNotes.substring(0, 50) + '...' : 'none');
+      console.log('   Total Matched:', totalMatchedAudience);
       console.log('   Tags:', campaignTags.length, 'tags found');
     } else if (campaignError) {
       console.log('⚠️ Cannot access campaign table:', campaignError.code);
@@ -285,7 +289,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const { data: detailsData, error: detailsError } = await supabase
         .schema('citia_mora_datamart')
         .from('audience')
-        .select('id, full_name, source_contact_id, wa_opt_in, telegram_username, phone_number')
+        .select('id, full_name, source_contact_id, wa_opt_in, telegram_username')
         .in('id', audienceIds);
 
       if (detailsError) {
@@ -308,20 +312,28 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const meta = item.meta || {};
       const guardrails = meta.guardrails || {};
       
-      // Determine channel
-      const isWhatsApp = audienceDetail.wa_opt_in;
-      const isTelegram = !!audienceDetail.telegram_username;
-      const channel = isWhatsApp ? 'whatsapp' : isTelegram ? 'telegram' : 'whatsapp';
+      // Determine channel based on wa_opt_in and telegram_username
+      // If wa_opt_in is true, it's WhatsApp
+      // If telegram_username exists and wa_opt_in is not true, it's Telegram
+      const isWhatsApp = audienceDetail.wa_opt_in === true;
+      const isTelegram = !isWhatsApp && !!audienceDetail.telegram_username;
+      const channel = isWhatsApp ? 'whatsapp' : isTelegram ? 'telegram' : 'whatsapp'; // Default to whatsapp
       
       // Determine "send to" value based on channel
+      // For WhatsApp: use source_contact_id (format: wa-628xxx or phone number like dummy:1)
+      // For Telegram: use telegram_username or source_contact_id
       let sendTo = '';
       if (channel === 'whatsapp') {
-        sendTo = audienceDetail.phone_number || audienceDetail.source_contact_id || '';
+        // source_contact_id might be in format "wa-628xxx" or "dummy:1" or phone number
+        sendTo = audienceDetail.source_contact_id || '';
       } else if (channel === 'telegram') {
+        // Prefer telegram_username, fallback to source_contact_id
         sendTo = audienceDetail.telegram_username || audienceDetail.source_contact_id || '';
       } else {
         sendTo = audienceDetail.source_contact_id || '';
       }
+      
+      console.log('   Audience:', audienceDetail.full_name || 'Unknown', '- Channel:', channel, '- Send To:', sendTo);
 
       // Map guardrails tag: 'approved' -> 'passed'
       let guardrailsTag = guardrails.tag || 'needs_review';
@@ -334,7 +346,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         audience_id: item.audience_id,
         audience_name: audienceDetail.full_name || audienceDetail.source_contact_id || 'Unknown',
         source_contact_id: audienceDetail.source_contact_id || '',
-        phone_number: audienceDetail.phone_number || '',
         telegram_username: audienceDetail.telegram_username || '',
         send_to: sendTo || audienceDetail.source_contact_id || 'Unknown',
         channel: channel,

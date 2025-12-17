@@ -12,7 +12,6 @@ interface DraftAudience {
   audience_id: string;
   audience_name: string;
   source_contact_id: string;
-  phone_number?: string;
   telegram_username?: string;
   send_to: string;
   channel: string;
@@ -245,39 +244,49 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
       {/* Campaign Info */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl">{draft.campaign_name || 'Untitled Campaign'}</CardTitle>
+          <CardTitle className="text-2xl font-bold">{draft.campaign_name || 'Untitled Campaign'}</CardTitle>
+          
+          {/* Objective */}
           {draft.campaign_objective && (
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-              {draft.campaign_objective}
-            </p>
-          )}
-          <div className="mt-4 space-y-2">
-            {draft.origin_notes && (
-              <div>
-                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Origin Notes:</p>
-                <p className="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 p-2 rounded">
-                  {draft.origin_notes}
-                </p>
-              </div>
-            )}
-            <div className="flex items-center gap-4 text-sm">
-              {draft.total_matched_audience !== undefined && (
-                <div>
-                  <span className="text-gray-500 dark:text-gray-400">Total Matched Audience: </span>
-                  <span className="font-semibold">{draft.total_matched_audience}</span>
-                </div>
-              )}
+            <div className="mt-3">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Objective:</p>
+              <p className="text-sm text-gray-700 dark:text-gray-300">
+                {draft.campaign_objective}
+              </p>
             </div>
-            {draft.campaign_tags && draft.campaign_tags.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-2">
+          )}
+          
+          {/* Origin Notes */}
+          {draft.origin_notes && (
+            <div className="mt-3">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Origin Notes from Admin Citia:</p>
+              <p className="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 p-3 rounded border border-gray-200 dark:border-gray-700">
+                {draft.origin_notes}
+              </p>
+            </div>
+          )}
+          
+          {/* Total Matched Audience */}
+          {draft.total_matched_audience !== undefined && (
+            <div className="mt-3">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Total Matched Audience:</p>
+              <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{draft.total_matched_audience}</p>
+            </div>
+          )}
+          
+          {/* Tags */}
+          {draft.campaign_tags && draft.campaign_tags.length > 0 && (
+            <div className="mt-3">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Tags:</p>
+              <div className="flex flex-wrap gap-2">
                 {draft.campaign_tags.map((tag, idx) => (
-                  <Badge key={idx} variant="secondary" className="text-xs">
+                  <Badge key={idx} variant="secondary" className="text-xs px-2 py-1">
                     {tag}
                   </Badge>
                 ))}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </CardHeader>
       </Card>
 
@@ -472,20 +481,27 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
                   {/* Message Bubble */}
                   <div className="bg-blue-50 dark:bg-blue-950 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
                     {editingContent === selectedAudienceDetail.audience_id ? (
-                      <textarea
-                        value={editedContent}
-                        onChange={(e) => setEditedContent(e.target.value)}
-                        className="w-full min-h-[100px] p-2 border rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="Edit message content..."
-                      />
+                      <>
+                        <textarea
+                          value={editedContent}
+                          onChange={(e) => setEditedContent(e.target.value)}
+                          className="w-full min-h-[100px] p-2 border rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Edit message content..."
+                        />
+                        <p className="text-xs text-gray-500 mt-2">
+                          {editedContent.length} characters
+                        </p>
+                      </>
                     ) : (
-                      <p className="text-sm whitespace-pre-wrap">
-                        {selectedAudienceDetail.broadcast_content}
-                      </p>
+                      <>
+                        <p className="text-sm whitespace-pre-wrap">
+                          {selectedAudienceDetail.broadcast_content}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-2">
+                          {selectedAudienceDetail.character_count} characters
+                        </p>
+                      </>
                     )}
-                    <p className="text-xs text-gray-500 mt-2">
-                      {selectedAudienceDetail.character_count} characters
-                    </p>
                   </div>
                 </div>
               </div>
