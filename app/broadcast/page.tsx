@@ -410,10 +410,13 @@ export default function BroadcastPage() {
       
       if (state === 'drafted') {
         setDraftCampaignId(campaignId);
-        setActiveTab('output');
+        // Don't auto-switch tabs
       } else if (state === 'approved' || state === 'rejected') {
         setDraftCampaignId(null);
-        setActiveTab('input');
+        // Only switch if currently on output tab
+        if (activeTab === 'output') {
+          setActiveTab('input');
+        }
         // Clear localStorage
         if (typeof window !== 'undefined' && window.localStorage) {
           localStorage.removeItem('current_campaign_id');
@@ -557,7 +560,7 @@ export default function BroadcastPage() {
     // Check if there's a draft that needs to be resolved first
     if (campaignState === 'drafted' && draftCampaignId) {
       setError('Please resolve the current draft campaign first (approve or reject).');
-      setActiveTab('output');
+      // Don't auto-switch tabs - show error message instead
       return;
     }
 
