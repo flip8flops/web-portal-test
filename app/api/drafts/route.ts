@@ -21,33 +21,47 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const searchParams = request.nextUrl.searchParams;
     const campaignId = searchParams.get('campaign_id');
 
-    // Find latest campaign with status "content_drafted" (message contains "cpgDrafted")
-    let query = supabase
-      .schema('citia_mora_datamart')
-      .from('campaign_status_updates')
-      .select('campaign_id, message, updated_at')
-      .ilike('message', '%cpgDrafted%')
-      .order('updated_at', { ascending: false })
-      .limit(1);
+    // Find latest campaign with status "content_drafted"
+    let latestDraftCampaignId = campaignId;
 
-    const { data: statusData, error: statusError } = await query;
+    if (!latestDraftCampaignId) {
+      // First, try to find from campaign.status = 'content_drafted'
+      const { data: campaignData, error: campaignError } = await supabase
+        .schema('citia_mora_datamart')
+        .from('campaign')
+        .select('id, status, updated_at')
+        .eq('status', 'content_drafted')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    if (statusError) {
-      console.error('Error fetching draft status:', statusError);
-      return NextResponse.json(
-        { error: 'Failed to fetch draft status' },
-        { status: 500 }
-      );
+      if (!campaignError && campaignData) {
+        latestDraftCampaignId = campaignData.id;
+        console.log('✅ Found draft campaign from campaign.status:', latestDraftCampaignId);
+      } else {
+        // Fallback: check campaign_status_updates with message cpgDrafted
+        const { data: statusData, error: statusError } = await supabase
+          .schema('citia_mora_datamart')
+          .from('campaign_status_updates')
+          .select('campaign_id, message, updated_at')
+          .ilike('message', '%cpgDrafted%')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!statusError && statusData) {
+          latestDraftCampaignId = statusData.campaign_id;
+          console.log('✅ Found draft campaign from campaign_status_updates:', latestDraftCampaignId);
+        }
+      }
     }
 
-    if (!statusData || statusData.length === 0) {
+    if (!latestDraftCampaignId) {
       return NextResponse.json({
         draft: null,
         message: 'No draft campaign found'
       });
     }
-
-    const latestDraftCampaignId = campaignId || statusData[0].campaign_id;
 
     // Get campaign info
     const { data: campaignData, error: campaignError } = await supabase

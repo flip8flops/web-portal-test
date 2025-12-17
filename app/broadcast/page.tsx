@@ -46,7 +46,30 @@ export default function BroadcastPage() {
     if (!cid || cid === 'pending') return 'idle';
 
     try {
-      // Check for latest status messages
+      // First, check campaign.status directly
+      const { data: campaignData, error: campaignError } = await supabase
+        .schema('citia_mora_datamart')
+        .from('campaign')
+        .select('status')
+        .eq('id', cid)
+        .maybeSingle();
+
+      if (!campaignError && campaignData) {
+        const campaignStatus = campaignData.status;
+        
+        // Check campaign.status first
+        if (campaignStatus === 'content_drafted') {
+          return 'drafted';
+        }
+        if (campaignStatus === 'sent' || campaignStatus === 'approved') {
+          return 'approved';
+        }
+        if (campaignStatus === 'rejected') {
+          return 'rejected';
+        }
+      }
+
+      // Fallback: Check for latest status messages from campaign_status_updates
       const { data: statusData, error } = await supabase
         .schema('citia_mora_datamart')
         .from('campaign_status_updates')
@@ -103,20 +126,37 @@ export default function BroadcastPage() {
   // Find latest draft campaign
   const findLatestDraftCampaign = async (): Promise<string | null> => {
     try {
-      const { data, error } = await supabase
+      // First, try to find from campaign.status = 'content_drafted'
+      const { data: campaignData, error: campaignError } = await supabase
+        .schema('citia_mora_datamart')
+        .from('campaign')
+        .select('id, status, updated_at')
+        .eq('status', 'content_drafted')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!campaignError && campaignData) {
+        console.log('✅ Found draft campaign from campaign.status:', campaignData.id);
+        return campaignData.id;
+      }
+
+      // Fallback: check campaign_status_updates with message cpgDrafted
+      const { data: statusData, error: statusError } = await supabase
         .schema('citia_mora_datamart')
         .from('campaign_status_updates')
         .select('campaign_id, message, updated_at')
         .ilike('message', '%cpgDrafted%')
         .order('updated_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
-      if (error || !data) {
-        return null;
+      if (!statusError && statusData) {
+        console.log('✅ Found draft campaign from campaign_status_updates:', statusData.campaign_id);
+        return statusData.campaign_id;
       }
 
-      return data.campaign_id;
+      return null;
     } catch (error) {
       console.error('Error finding draft campaign:', error);
       return null;
