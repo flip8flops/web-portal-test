@@ -123,37 +123,20 @@ export default function BroadcastPage() {
     }
   };
 
-  // Find latest draft campaign
+  // Find latest draft campaign via API (to avoid permission issues)
   const findLatestDraftCampaign = async (): Promise<string | null> => {
     try {
-      // First, try to find from campaign.status = 'content_drafted'
-      const { data: campaignData, error: campaignError } = await supabase
-        .schema('citia_mora_datamart')
-        .from('campaign')
-        .select('id, status, updated_at')
-        .eq('status', 'content_drafted')
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (!campaignError && campaignData) {
-        console.log('✅ Found draft campaign from campaign.status:', campaignData.id);
-        return campaignData.id;
+      // Use API endpoint instead of direct Supabase query (avoids 403 permission errors)
+      const response = await fetch('/api/drafts');
+      if (!response.ok) {
+        console.warn('⚠️ Failed to fetch draft campaign from API:', response.status);
+        return null;
       }
 
-      // Fallback: check campaign_status_updates with message cpgDrafted
-      const { data: statusData, error: statusError } = await supabase
-        .schema('citia_mora_datamart')
-        .from('campaign_status_updates')
-        .select('campaign_id, message, updated_at')
-        .ilike('message', '%cpgDrafted%')
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (!statusError && statusData) {
-        console.log('✅ Found draft campaign from campaign_status_updates:', statusData.campaign_id);
-        return statusData.campaign_id;
+      const data = await response.json();
+      if (data.draft && data.draft.campaign_id) {
+        console.log('✅ Found draft campaign via API:', data.draft.campaign_id);
+        return data.draft.campaign_id;
       }
 
       return null;
