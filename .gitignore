@@ -33,7 +33,7 @@ build/
 .cache/
 .turbo/
 
-# Debugging and analysis files (temporary)
+# Debugging and analysis files (temporary - keep only essential docs)
 DEBUGGING-GUIDE.md
 QUICK-DEBUG-STEPS.md
 N8N-WEBHOOK-RESPONSE-GUIDE.md
@@ -48,3 +48,10 @@ BROADCAST-UI-PLANNING.md
 REALTIME-FIX-INSTRUCTIONS.md
 docs/permission-error-analysis.md
 docs/status-display-improvements-planning.md
+
+# Development scripts (not needed in production)
+scripts/*.js
+scripts/*.ts
+
+# Migration files (keep in repo but ignore execution logs)
+supabase/migrations/*.log
