@@ -46,30 +46,18 @@ export default function BroadcastPage() {
     if (!cid || cid === 'pending') return 'idle';
 
     try {
-      // First, check campaign.status directly
-      const { data: campaignData, error: campaignError } = await supabase
-        .schema('citia_mora_datamart')
-        .from('campaign')
-        .select('status')
-        .eq('id', cid)
-        .maybeSingle();
-
-      if (!campaignError && campaignData) {
-        const campaignStatus = campaignData.status;
-        
-        // Check campaign.status first
-        if (campaignStatus === 'content_drafted') {
+      // Use API endpoint to check draft status (avoids permission issues)
+      const response = await fetch(`/api/drafts?campaign_id=${cid}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.draft) {
+          // If API returns draft, it means campaign is in drafted state
           return 'drafted';
-        }
-        if (campaignStatus === 'sent' || campaignStatus === 'approved') {
-          return 'approved';
-        }
-        if (campaignStatus === 'rejected') {
-          return 'rejected';
         }
       }
 
       // Fallback: Check for latest status messages from campaign_status_updates
+      // This table should have public read access
       const { data: statusData, error } = await supabase
         .schema('citia_mora_datamart')
         .from('campaign_status_updates')
@@ -134,11 +122,14 @@ export default function BroadcastPage() {
       }
 
       const data = await response.json();
-      if (data.draft && data.draft.campaign_id) {
-        console.log('✅ Found draft campaign via API:', data.draft.campaign_id);
-        return data.draft.campaign_id;
+      // Check both draft.campaign_id and campaign_id (API returns both)
+      const foundCampaignId = data.draft?.campaign_id || data.campaign_id;
+      if (foundCampaignId) {
+        console.log('✅ Found draft campaign via API:', foundCampaignId);
+        return foundCampaignId;
       }
 
+      console.log('ℹ️ No draft campaign found via API');
       return null;
     } catch (error) {
       console.error('Error finding draft campaign:', error);
@@ -276,19 +267,9 @@ export default function BroadcastPage() {
                   }
                 }
               } else {
-                // No saved campaign and no draft, check for any draft
-                const anyDraftId = await findLatestDraftCampaign();
-                if (anyDraftId) {
-                  const draftState = await checkCampaignState(anyDraftId);
-                  if (mounted) {
-                    setDraftCampaignId(anyDraftId);
-                    setCampaignState(draftState);
-                    if (draftState === 'drafted') {
-                      setCampaignId(anyDraftId);
-                      setActiveTab('output');
-                    }
-                  }
-                }
+                // No saved campaign and no draft found above, but check one more time
+                // (This handles case where findLatestDraftCampaign was called but returned null)
+                console.log('ℹ️ No saved campaign, checking for drafts one more time...');
               }
             } catch (err) {
               console.error('Error restoring campaign session:', err);
@@ -644,12 +625,14 @@ export default function BroadcastPage() {
 
         {/* Input Tab */}
         <TabsContent value="input" className="space-y-6">
-          {/* Status Display Area */}
-          <StatusDisplay 
-            campaignId={campaignId} 
-            executionId={executionId}
-            onProcessingChange={setIsProcessing}
-          />
+          {/* Status Display Area - Always show if we have a campaignId (draft or processing) */}
+          {(campaignId || draftCampaignId) && (
+            <StatusDisplay 
+              campaignId={campaignId || draftCampaignId} 
+              executionId={executionId}
+              onProcessingChange={setIsProcessing}
+            />
+          )}
 
           {/* Error Messages */}
           {error && (

@@ -59,6 +59,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (!latestDraftCampaignId) {
       return NextResponse.json({
         draft: null,
+        campaign_id: null,
         message: 'No draft campaign found'
       });
     }
@@ -154,7 +155,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         audiences,
         created_at: campaignData.created_at,
         updated_at: campaignData.updated_at,
-      }
+      },
+      campaign_id: campaignData.id, // Also return campaign_id for easier access
     });
   } catch (error) {
     console.error('Error in GET /api/drafts:', error);
