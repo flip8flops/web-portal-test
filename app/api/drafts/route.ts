@@ -32,7 +32,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     console.log('🔍 GET /api/drafts - Starting...');
     console.log('🔍 Supabase URL:', supabaseUrl ? `${supabaseUrl.substring(0, 30)}...` : 'MISSING');
-    console.log('🔍 Service Key:', supabaseServiceKey ? `${supabaseServiceKey.substring(0, 20)}...` : 'MISSING');
+    console.log('🔍 Anon Key:', supabaseAnonKey ? `${supabaseAnonKey.substring(0, 20)}...` : 'MISSING');
     
     const searchParams = request.nextUrl.searchParams;
     const campaignId = searchParams.get('campaign_id');
