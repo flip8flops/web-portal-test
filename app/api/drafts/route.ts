@@ -272,8 +272,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // Get campaign audiences with broadcast_content
     console.log('🔍 Fetching campaign audiences with broadcast_content...');
     console.log('   Campaign ID:', latestDraftCampaignId);
+    console.log('   Timestamp:', new Date().toISOString());
     
-    const { data: audienceData, error: audienceError } = await supabase
+    // Create a fresh client instance to bypass any potential caching
+    const fetchSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+      db: {
+        schema: 'citia_mora_datamart',
+      },
+    });
+    
+    const { data: audienceData, error: audienceError } = await fetchSupabase
       .schema('citia_mora_datamart')
       .from('campaign_audience')
       .select(`
