@@ -380,15 +380,35 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
               if (update.agent_name === 'guardrails') {
                 const metadata = update.metadata || {};
                 const workflowPoint = metadata.workflow_point || '';
-                // Check if this is QC phase guardrails
-                if (workflowPoint.includes('guardrails_checking') || 
-                    workflowPoint.includes('guardrails_completed') ||
-                    workflowPoint.includes('guardrails_error')) {
-                  // Check if content_maker_agent already completed
+                
+                // Check if this is initial guardrails (start, guardrails_accepted, guardrails_rejected)
+                const isInitial = workflowPoint === 'start' || 
+                                  workflowPoint.includes('guardrails_accepted') ||
+                                  workflowPoint.includes('guardrails_rejected');
+                
+                if (isInitial) {
+                  // This is initial guardrails - keep as 'guardrails'
+                  agentKey = 'guardrails';
+                } else if (workflowPoint.includes('guardrails_checking') || 
+                           workflowPoint.includes('guardrails_completed') ||
+                           workflowPoint.includes('guardrails_error')) {
+                  // This is QC phase guardrails
+                  agentKey = 'guardrails_qc';
+                } else {
+                  // If workflow_point is unclear, check timestamp relative to content_maker
                   const currentStatuses = statuses;
                   const contentMakerStatus = currentStatuses['content_maker_agent'];
                   if (contentMakerStatus && contentMakerStatus.status === 'completed') {
-                    agentKey = 'guardrails_qc';
+                    const contentMakerTime = new Date(contentMakerStatus.updated_at);
+                    const updateTime = new Date(update.updated_at);
+                    if (updateTime > contentMakerTime) {
+                      agentKey = 'guardrails_qc';
+                    } else {
+                      agentKey = 'guardrails';
+                    }
+                  } else {
+                    // No content_maker yet, assume initial
+                    agentKey = 'guardrails';
                   }
                 }
               }
