@@ -132,6 +132,47 @@ export default function BroadcastPage() {
         return 'drafted';
       }
 
+      // CRITICAL: Check for rejected/approved status FIRST (before checking messages)
+      // Check campaign.status directly from database
+      try {
+        const { data: campaignCheck, error: checkError } = await supabase
+          .schema('citia_mora_datamart')
+          .from('campaign')
+          .select('id, status')
+          .eq('id', cid)
+          .single();
+        
+        if (!checkError && campaignCheck) {
+          if (campaignCheck.status === 'rejected') {
+            console.log('✅ Detected rejected state from campaign.status');
+            return 'rejected';
+          }
+          if (campaignCheck.status === 'approved' || campaignCheck.status === 'sent') {
+            console.log('✅ Detected approved state from campaign.status');
+            return 'approved';
+          }
+        }
+      } catch (e) {
+        console.warn('Could not check campaign.status directly:', e);
+      }
+      
+      // Check for rejected/approved in status updates
+      const hasRejected = statusData.some(
+        (s) => s.agent_name === 'broadcast_reject' && s.status === 'rejected'
+      );
+      const hasApproved = statusData.some(
+        (s) => (s.agent_name === 'broadcast_send' || s.agent_name === 'broadcast_approve') && s.status === 'completed'
+      );
+      
+      if (hasRejected) {
+        console.log('✅ Detected rejected state from status updates');
+        return 'rejected';
+      }
+      if (hasApproved) {
+        console.log('✅ Detected approved state from status updates');
+        return 'approved';
+      }
+
       // Check for latest status messages (check most recent first)
       const messages = statusData.map(s => s.message).filter(Boolean);
       
@@ -279,7 +320,7 @@ export default function BroadcastPage() {
                     setCampaignState('drafted');
                     setCampaignId(latestDraftId);
                     
-                    // Save to localStorage
+                    // Save to localStorage for persistence
                     if (typeof window !== 'undefined' && window.localStorage) {
                       localStorage.setItem('current_campaign_id', latestDraftId);
                       localStorage.setItem('current_campaign_timestamp', Date.now().toString());
@@ -305,72 +346,63 @@ export default function BroadcastPage() {
                   }
                 }
               } else {
-                console.log('ℹ️ No draft campaign found');
-                // IMPORTANT: If no draft found, clear any saved campaign_id from localStorage
-                // This prevents showing rejected/approved campaigns after refresh
-                if (typeof window !== 'undefined' && window.localStorage) {
-                  const savedId = localStorage.getItem('current_campaign_id');
-                  if (savedId) {
-                    console.log('🧹 Clearing saved campaign_id from localStorage (no draft found):', savedId);
-                    localStorage.removeItem('current_campaign_id');
-                    localStorage.removeItem('current_execution_id');
-                    localStorage.removeItem('current_campaign_timestamp');
-                  }
-                }
-              }
-              
-              // Also check saved campaign if no draft found or if we want to restore processing state
-              // BUT: Only if we haven't already cleared it above
-              if (savedCampaignId || savedExecutionId) {
-                // IMPORTANT: Verify saved campaign is still valid (not rejected/approved)
-                console.log('✅ Found saved campaign session, verifying status...');
+                // No draft found from API - check saved campaign from localStorage
+                console.log('ℹ️ No draft campaign found from API, checking saved campaign...');
                 
-                const state = await checkCampaignState(savedCampaignId);
-                console.log('📋 Saved campaign state:', savedCampaignId, '→', state);
-                
-                if (mounted) {
-                  // IMPORTANT: If saved campaign is rejected/approved, clear it
-                  if (state === 'rejected' || state === 'approved') {
-                    console.log('⚠️ Saved campaign is', state, '- clearing from localStorage');
-                    setCampaignId(null);
-                    setExecutionId(null);
-                    setDraftCampaignId(null);
-                    setCampaignState('idle');
-                    setActiveTab('input');
-                    if (typeof window !== 'undefined' && window.localStorage) {
-                      localStorage.removeItem('current_campaign_id');
-                      localStorage.removeItem('current_execution_id');
-                      localStorage.removeItem('current_campaign_timestamp');
-                    }
-                  } else if (state === 'processing') {
-                    setCampaignId(savedCampaignId);
-                    setExecutionId(savedExecutionId);
-                    setCampaignState('processing');
-                    setActiveTab('input');
-                  } else if (state === 'drafted') {
-                    // Only set if we didn't already set it from latestDraftId above
-                    if (!latestDraftId || latestDraftId !== savedCampaignId) {
+                if (savedCampaignId && savedCampaignId !== 'pending') {
+                  // IMPORTANT: Verify saved campaign is still valid (not rejected/approved)
+                  console.log('✅ Found saved campaign session, verifying status...');
+                  
+                  const state = await checkCampaignState(savedCampaignId);
+                  console.log('📋 Saved campaign state:', savedCampaignId, '→', state);
+                  
+                  if (mounted) {
+                    // IMPORTANT: If saved campaign is rejected/approved, clear it
+                    if (state === 'rejected' || state === 'approved') {
+                      console.log('⚠️ Saved campaign is', state, '- clearing from localStorage');
+                      setCampaignId(null);
+                      setExecutionId(null);
+                      setDraftCampaignId(null);
+                      setCampaignState('idle');
+                      setActiveTab('input');
+                      if (typeof window !== 'undefined' && window.localStorage) {
+                        localStorage.removeItem('current_campaign_id');
+                        localStorage.removeItem('current_execution_id');
+                        localStorage.removeItem('current_campaign_timestamp');
+                      }
+                    } else if (state === 'processing') {
+                      setCampaignId(savedCampaignId);
+                      setExecutionId(savedExecutionId);
+                      setCampaignState('processing');
+                      setActiveTab('input');
+                    } else if (state === 'drafted') {
+                      // Saved campaign is still drafted - restore it
+                      console.log('✅ Restoring saved drafted campaign:', savedCampaignId);
                       setCampaignId(savedCampaignId);
                       setDraftCampaignId(savedCampaignId);
                       setCampaignState('drafted');
-                    }
-                  } else {
-                    // Finished or idle, clear
-                    setCampaignId(null);
-                    setExecutionId(null);
-                    setDraftCampaignId(null);
-                    setCampaignState('idle');
-                    setActiveTab('input');
-                    if (typeof window !== 'undefined' && window.localStorage) {
-                      localStorage.removeItem('current_campaign_id');
-                      localStorage.removeItem('current_execution_id');
-                      localStorage.removeItem('current_campaign_timestamp');
+                      // Keep localStorage as is
+                    } else {
+                      // Finished or idle, clear
+                      setCampaignId(null);
+                      setExecutionId(null);
+                      setDraftCampaignId(null);
+                      setCampaignState('idle');
+                      setActiveTab('input');
+                      if (typeof window !== 'undefined' && window.localStorage) {
+                        localStorage.removeItem('current_campaign_id');
+                        localStorage.removeItem('current_execution_id');
+                        localStorage.removeItem('current_campaign_timestamp');
+                      }
                     }
                   }
+                } else {
+                  // No saved campaign and no draft found
+                  console.log('ℹ️ No saved campaign, state is idle');
+                  setCampaignId(null);
+                  setDraftCampaignId(null);
+                  setCampaignState('idle');
                 }
-              } else {
-                // No saved campaign and no draft found above
-                console.log('ℹ️ No saved campaign, state is idle');
               }
             } catch (err) {
               console.error('Error restoring campaign session:', err);

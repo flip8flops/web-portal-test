@@ -158,7 +158,9 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange, onD
           query = query.gte('created_at', fiveMinutesAgo).limit(50);
         }
 
-        const { data, error } = await query.order('created_at', { ascending: false });
+        // IMPORTANT: Order by updated_at DESC to get latest statuses first
+        // This ensures we capture all guardrails updates (initial and QC)
+        const { data, error } = await query.order('updated_at', { ascending: false });
 
         if (error) {
           console.error('StatusDisplay: Error fetching statuses:', error);
@@ -199,7 +201,8 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange, onD
               return;
             }
             
-            // Special handling for guardrails: collect all guardrails updates
+            // Special handling for guardrails: collect ALL guardrails updates (both initial and QC)
+            // IMPORTANT: We need to collect ALL guardrails updates to properly separate initial vs QC
             if (update.agent_name === 'guardrails') {
               guardrailsUpdates.push({
                 update,
