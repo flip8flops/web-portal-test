@@ -69,7 +69,21 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange, onD
     onProcessingChange(isProcessing);
     
     // Check if campaign is drafted (all agents completed, including guardrails_qc)
+    // CRITICAL: Only call onDrafted if campaign is NOT rejected/approved
     if (!isProcessing && Object.keys(statuses).length > 0 && campaignId && campaignId !== 'pending') {
+      // FIRST: Check if campaign has been rejected or approved (don't call onDrafted if so)
+      const hasRejected = Object.values(statuses).some(
+        (s) => s.agent_name === 'broadcast_reject' && s.status === 'rejected'
+      );
+      const hasApproved = Object.values(statuses).some(
+        (s) => (s.agent_name === 'broadcast_send' || s.agent_name === 'broadcast_approve') && s.status === 'completed'
+      );
+      
+      if (hasRejected || hasApproved) {
+        console.log(`⚠️ [StatusDisplay] Campaign ${campaignId} is ${hasRejected ? 'rejected' : 'approved'} - NOT calling onDrafted`);
+        return; // Don't call onDrafted if campaign is rejected/approved
+      }
+      
       const allAgents = ['guardrails', 'research_agent', 'matchmaker_agent', 'content_maker_agent', 'guardrails_qc'];
       const allFinished = allAgents.every((agent) => {
         const status = statuses[agent];

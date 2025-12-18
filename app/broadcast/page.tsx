@@ -42,7 +42,7 @@ export default function BroadcastPage() {
   const [activeTab, setActiveTab] = useState('input');
 
   // Check campaign state (drafted, approved, rejected, processing)
-  // CRITICAL: Always check campaign.status from database FIRST (highest priority)
+  // CRITICAL: Use API endpoint to check state (avoids permission errors on client-side)
   const checkCampaignState = async (cid: string | null): Promise<CampaignState> => {
     if (!cid || cid === 'pending') {
       console.log('🔍 [checkCampaignState] Campaign ID is null or pending, returning idle');
@@ -52,50 +52,37 @@ export default function BroadcastPage() {
     console.log(`🔍 [checkCampaignState] Checking state for campaign: ${cid}`);
 
     try {
-      // STEP 1: CRITICAL - Check campaign.status directly from database FIRST (highest priority)
-      // This is the source of truth and must be checked before any status messages
-      console.log(`📊 [checkCampaignState] STEP 1: Checking campaign.status from database...`);
-      const { data: campaignCheck, error: checkError } = await supabase
-        .schema('citia_mora_datamart')
-        .from('campaign')
-        .select('id, status, updated_at')
-        .eq('id', cid)
-        .single();
-      
-      if (!checkError && campaignCheck) {
-        const dbStatus = campaignCheck.status;
-        console.log(`📊 [checkCampaignState] Database status: ${dbStatus} (updated_at: ${campaignCheck.updated_at})`);
-        
-        // Database status is the source of truth - return immediately if rejected/approved
-        if (dbStatus === 'rejected') {
-          console.log(`✅ [checkCampaignState] RESULT: rejected (from campaign.status)`);
-          return 'rejected';
-        }
-        if (dbStatus === 'approved' || dbStatus === 'sent') {
-          console.log(`✅ [checkCampaignState] RESULT: approved (from campaign.status)`);
-          return 'approved';
-        }
-        if (dbStatus === 'content_drafted') {
-          // Campaign is drafted - verify with status updates to ensure all agents completed
-          console.log(`📊 [checkCampaignState] Campaign status is content_drafted, verifying with status updates...`);
-        } else {
-          // Unknown status or processing - check status updates
-          console.log(`📊 [checkCampaignState] Campaign status is ${dbStatus}, checking status updates...`);
-        }
-      } else {
-        console.warn(`⚠️ [checkCampaignState] Could not fetch campaign.status:`, checkError?.message || 'Unknown error');
-      }
-
-      // STEP 2: Check API endpoint for draft (if campaign.status is content_drafted)
-      console.log(`📊 [checkCampaignState] STEP 2: Checking API endpoint for draft...`);
+      // STEP 1: Check API endpoint FIRST (has proper permissions and checks campaign.status)
+      // API endpoint checks campaign.status directly and returns null if rejected/approved
+      console.log(`📊 [checkCampaignState] STEP 1: Checking API endpoint for campaign state...`);
       const response = await fetch(`/api/drafts?campaign_id=${cid}`);
       if (response.ok) {
         const data = await response.json();
+        
+        // If API returns draft, campaign is definitely drafted
         if (data.draft) {
           console.log(`✅ [checkCampaignState] RESULT: drafted (from API)`);
           return 'drafted';
         }
-        console.log(`📊 [checkCampaignState] API returned no draft for campaign ${cid}`);
+        
+        // If API returns campaign_id but no draft, check the message to determine state
+        if (data.campaign_id === cid) {
+          // API found campaign but returned no draft - check message for reason
+          if (data.message) {
+            if (data.message.includes('rejected') || data.message.includes('not content_drafted')) {
+              console.log(`✅ [checkCampaignState] RESULT: rejected (from API message)`);
+              return 'rejected';
+            }
+            if (data.message.includes('approved') || data.message.includes('sent')) {
+              console.log(`✅ [checkCampaignState] RESULT: approved (from API message)`);
+              return 'approved';
+            }
+          }
+        }
+        
+        console.log(`📊 [checkCampaignState] API returned no draft for campaign ${cid}, checking status updates...`);
+      } else {
+        console.warn(`⚠️ [checkCampaignState] API endpoint returned error: ${response.status}`);
       }
 
       // STEP 3: Check status updates from campaign_status_updates (fallback)
@@ -549,21 +536,12 @@ export default function BroadcastPage() {
       console.log(`📊 [STATE CHECK] Detected State: ${state}`);
       console.log(`📊 [STATE CHECK] ==========================================\n`);
       
-      setCampaignState(state);
-      
-      if (state === 'drafted') {
-        // IMPORTANT: Set draftCampaignId when state becomes drafted
-        console.log('✅ Campaign is drafted, setting draftCampaignId:', campaignId);
-        setDraftCampaignId(campaignId);
-        // Save to localStorage for persistence
-        if (typeof window !== 'undefined' && window.localStorage) {
-          localStorage.setItem('current_campaign_id', campaignId);
-          localStorage.setItem('current_campaign_timestamp', Date.now().toString());
-        }
-        // Don't auto-switch tabs
-      } else if (state === 'approved' || state === 'rejected') {
-        console.log(`⚠️ Campaign is ${state}, clearing state and localStorage`);
+      // CRITICAL: If state is rejected/approved, clear everything immediately
+      if (state === 'approved' || state === 'rejected') {
+        console.log(`⚠️ [STATE CHECK] Campaign is ${state}, clearing ALL state immediately`);
         setDraftCampaignId(null);
+        setCampaignId(null);
+        setCampaignState('idle');
         // Only switch if currently on output tab
         if (activeTab === 'output') {
           setActiveTab('input');
@@ -574,6 +552,21 @@ export default function BroadcastPage() {
           localStorage.removeItem('current_execution_id');
           localStorage.removeItem('current_campaign_timestamp');
         }
+        return; // Don't continue to drafted logic
+      }
+      
+      setCampaignState(state);
+      
+      if (state === 'drafted') {
+        // IMPORTANT: Set draftCampaignId when state becomes drafted
+        console.log('✅ [STATE CHECK] Campaign is drafted, setting draftCampaignId:', campaignId);
+        setDraftCampaignId(campaignId);
+        // Save to localStorage for persistence
+        if (typeof window !== 'undefined' && window.localStorage) {
+          localStorage.setItem('current_campaign_id', campaignId);
+          localStorage.setItem('current_campaign_timestamp', Date.now().toString());
+        }
+        // Don't auto-switch tabs
       }
     };
 
@@ -880,20 +873,34 @@ export default function BroadcastPage() {
               campaignId={campaignId || draftCampaignId} 
               executionId={executionId}
               onProcessingChange={setIsProcessing}
-              onDrafted={(cid) => {
+              onDrafted={async (cid) => {
                 console.log(`\n📊 [onDrafted CALLBACK] ==========================================`);
                 console.log(`📊 [onDrafted CALLBACK] StatusDisplay detected draft for campaign: ${cid}`);
-                console.log(`📊 [onDrafted CALLBACK] Updating browser state...`);
-                console.log(`📊 [onDrafted CALLBACK] ==========================================\n`);
                 
-                setDraftCampaignId(cid);
-                setCampaignState('drafted');
-                setCampaignId(cid);
-                // Save to localStorage for persistence
-                if (typeof window !== 'undefined' && window.localStorage) {
-                  localStorage.setItem('current_campaign_id', cid);
-                  localStorage.setItem('current_campaign_timestamp', Date.now().toString());
+                // CRITICAL: Verify campaign is still drafted (not rejected/approved) before updating state
+                const currentState = await checkCampaignState(cid);
+                console.log(`📊 [onDrafted CALLBACK] Verified campaign state: ${currentState}`);
+                
+                if (currentState === 'rejected' || currentState === 'approved') {
+                  console.log(`⚠️ [onDrafted CALLBACK] Campaign is ${currentState} - NOT updating to drafted state`);
+                  console.log(`📊 [onDrafted CALLBACK] ==========================================\n`);
+                  return; // Don't update state if campaign is rejected/approved
                 }
+                
+                if (currentState === 'drafted') {
+                  console.log(`📊 [onDrafted CALLBACK] Campaign confirmed as drafted, updating browser state...`);
+                  setDraftCampaignId(cid);
+                  setCampaignState('drafted');
+                  setCampaignId(cid);
+                  // Save to localStorage for persistence
+                  if (typeof window !== 'undefined' && window.localStorage) {
+                    localStorage.setItem('current_campaign_id', cid);
+                    localStorage.setItem('current_campaign_timestamp', Date.now().toString());
+                  }
+                } else {
+                  console.log(`⚠️ [onDrafted CALLBACK] Campaign state is ${currentState}, not drafted - NOT updating`);
+                }
+                console.log(`📊 [onDrafted CALLBACK] ==========================================\n`);
               }}
             />
           )}

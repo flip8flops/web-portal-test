@@ -152,11 +152,29 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       console.log(`   Status: ${finalCheck.status}`);
       console.log(`   Updated At: ${finalCheck.updated_at}`);
       
+      // CRITICAL: Check for rejected/approved FIRST before checking content_drafted
+      if (finalCheck.status === 'rejected') {
+        console.log(`❌ [API /api/drafts] Campaign ${latestDraftCampaignId} status is "rejected" - returning null`);
+        return NextResponse.json({
+          draft: null,
+          campaign_id: latestDraftCampaignId,
+          message: 'Campaign has been rejected',
+        });
+      }
+      if (finalCheck.status === 'approved' || finalCheck.status === 'sent') {
+        console.log(`❌ [API /api/drafts] Campaign ${latestDraftCampaignId} status is "${finalCheck.status}" - returning null`);
+        return NextResponse.json({
+          draft: null,
+          campaign_id: latestDraftCampaignId,
+          message: `Campaign has been ${finalCheck.status}`,
+        });
+      }
+      
       if (finalCheck.status !== 'content_drafted') {
         console.log(`❌ [API /api/drafts] Campaign ${latestDraftCampaignId} status is "${finalCheck.status}", not "content_drafted" - returning null`);
         return NextResponse.json({
           draft: null,
-          campaign_id: null,
+          campaign_id: latestDraftCampaignId,
           message: `No draft campaign found (campaign status is "${finalCheck.status}", not "content_drafted")`,
         });
       } else {
