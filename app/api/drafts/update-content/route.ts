@@ -80,6 +80,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       console.warn('⚠️ Update returned no data - might indicate no rows were updated');
     }
 
+    // Wait a small delay to ensure transaction is committed
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
     // Immediately verify by fetching the updated row
     // Use a fresh client instance to bypass any potential caching
     console.log('🔍 Verifying update by fetching row from database...');
@@ -93,14 +96,36 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       },
     });
     
-    // Add cache-busting timestamp to query
-    const cacheBuster = Date.now();
+    // Fetch ALL rows for this audience_id to see if there are duplicates
+    console.log('🔍 Checking ALL rows for this audience_id...');
+    const { data: allAudienceRows, error: allAudienceError } = await verifySupabase
+      .schema('citia_mora_datamart')
+      .from('campaign_audience')
+      .select('broadcast_content, updated_at, id')
+      .eq('campaign_id', campaign_id)
+      .eq('audience_id', audience_id)
+      .order('updated_at', { ascending: false });
+    
+    if (!allAudienceError && allAudienceRows) {
+      console.log(`   Found ${allAudienceRows.length} row(s) for this audience:`);
+      allAudienceRows.forEach((row, idx) => {
+        console.log(`   Row ${idx + 1}:`, {
+          id: row.id,
+          content_preview: row.broadcast_content?.substring(0, 50) || 'NULL',
+          updated_at: row.updated_at,
+        });
+      });
+    }
+    
+    // Get the single row (should be the latest)
     const { data: verifyData, error: verifyError } = await verifySupabase
       .schema('citia_mora_datamart')
       .from('campaign_audience')
       .select('broadcast_content, updated_at')
       .eq('campaign_id', campaign_id)
       .eq('audience_id', audience_id)
+      .order('updated_at', { ascending: false })
+      .limit(1)
       .single();
 
     if (verifyError) {
