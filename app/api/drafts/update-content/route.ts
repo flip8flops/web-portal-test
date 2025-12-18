@@ -35,7 +35,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const beforeUpdateTime = new Date();
     console.log('   Timestamp before update:', beforeUpdateTime.toISOString());
 
-    // Create a fresh client instance for update to avoid caching issues
+    // Create a fresh client instance
     const updateSupabase = createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
         persistSession: false,
@@ -46,10 +46,40 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       },
     });
 
+    // CRITICAL: Check if there are multiple rows with same campaign_id + audience_id
+    console.log('🔍 BEFORE UPDATE: Checking existing rows for this campaign_id + audience_id...');
+    const { data: existingRows, error: checkError } = await updateSupabase
+      .schema('citia_mora_datamart')
+      .from('campaign_audience')
+      .select('id, broadcast_content, updated_at, created_at')
+      .eq('campaign_id', campaign_id)
+      .eq('audience_id', audience_id)
+      .order('updated_at', { ascending: false });
+    
+    if (checkError) {
+      console.error('❌ Error checking existing rows:', checkError);
+    } else if (existingRows) {
+      console.log(`   Found ${existingRows.length} existing row(s):`);
+      existingRows.forEach((row, idx) => {
+        console.log(`   Existing Row ${idx + 1}:`, {
+          id: row.id,
+          content_preview: row.broadcast_content?.substring(0, 50) || 'NULL',
+          updated_at: row.updated_at,
+          created_at: row.created_at,
+        });
+      });
+      
+      if (existingRows.length > 1) {
+        console.warn('⚠️ WARNING: MULTIPLE ROWS FOUND! This will cause issues!');
+        console.warn('   Will update ALL rows, but fetch might get the wrong one');
+        console.warn('   Recommendation: Delete duplicate rows and keep only the latest one');
+      }
+    }
+
     const updateTimestamp = new Date().toISOString();
     console.log('   Update timestamp to set:', updateTimestamp);
     
-    // Update broadcast_content in database
+    // Update ALL rows with this campaign_id + audience_id
     const { data: updateData, error, count } = await updateSupabase
       .schema('citia_mora_datamart')
       .from('campaign_audience')
