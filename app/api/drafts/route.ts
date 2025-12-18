@@ -158,7 +158,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const { data: campaignTableData, error: campaignError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign')
-      .select('id, name, objective, image_url, meta, matchmaker_strategy, created_at, updated_at')
+      .select('id, name, objective, meta, matchmaker_strategy, created_at, updated_at')
       .eq('id', latestDraftCampaignId)
       .single();
 
