@@ -112,23 +112,6 @@ export default function BroadcastPage() {
         return 'drafted';
       }
 
-      // Check for content_maker_agent completed - this indicates draft is ready
-      const hasContentMakerCompleted = statusData.some(
-        (s) => s.agent_name === 'content_maker_agent' && s.status === 'completed'
-      );
-      
-      // Check for guardrails completed (guardrails out) - this also indicates draft is ready
-      const hasGuardrailsCompleted = statusData.some(
-        (s) => s.agent_name === 'guardrails' && s.status === 'completed' && 
-        s.message?.includes('cpgTagged')
-      );
-
-      // If content_maker_agent completed AND guardrails completed, campaign is drafted
-      if (hasContentMakerCompleted && hasGuardrailsCompleted) {
-        console.log('✅ Detected drafted state: content_maker_agent + guardrails completed');
-        return 'drafted';
-      }
-
       // Check for latest status messages (check most recent first)
       const messages = statusData.map(s => s.message).filter(Boolean);
       
