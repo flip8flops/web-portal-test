@@ -358,8 +358,6 @@ export default function BroadcastPage() {
         setDraftCampaignId(null);
         setCampaignId(null);
         setCampaignState('idle');
-          setCampaignId(null);
-        }
       }
     };
 
