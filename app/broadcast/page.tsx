@@ -656,7 +656,15 @@ export default function BroadcastPage() {
   }
 
   // Determine if input should be locked
-  const isInputLocked: boolean = campaignState === 'drafted' || (campaignState === 'approved' && !!draftCampaignId) || (campaignState === 'rejected' && !!draftCampaignId);
+  // Input is locked only if:
+  // 1. Campaign is drafted AND draftCampaignId exists (draft needs to be resolved)
+  // 2. Campaign is approved AND draftCampaignId exists (waiting for cleanup)
+  // Input is NOT locked if:
+  // - Campaign is rejected (even if draftCampaignId exists, it's been resolved)
+  // - Campaign is idle (no draft)
+  const isInputLocked: boolean = 
+    (campaignState === 'drafted' && !!draftCampaignId) || 
+    (campaignState === 'approved' && !!draftCampaignId);
   const isProcessingState: boolean = campaignState === 'processing' || isProcessing;
 
   return (
@@ -771,7 +779,7 @@ export default function BroadcastPage() {
                 </AlertDescription>
               </Alert>
             </div>
-          ) : (campaignState === 'drafted' || draftCampaignId) ? (
+          ) : (campaignState === 'drafted' && draftCampaignId) ? (
             <DraftOutput
               campaignId={draftCampaignId || campaignId}
               onApproveAndSend={handleApproveAndSend}
