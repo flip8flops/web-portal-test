@@ -102,22 +102,30 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
 
       console.log('✅ DraftOutput: Setting draft with', data.draft.audiences?.length || 0, 'audiences');
       console.log('📦 Draft data:', {
-        campaign_name: data.draft.campaign_name,
+        campaign_name: data.draft.campaign_name || 'MISSING',
         has_objective: !!data.draft.campaign_objective,
+        objective_preview: data.draft.campaign_objective ? data.draft.campaign_objective.substring(0, 50) : 'NONE',
         has_origin_notes: !!data.draft.origin_notes,
+        origin_notes_preview: data.draft.origin_notes ? data.draft.origin_notes.substring(0, 50) : 'NONE',
         tags_count: data.draft.campaign_tags?.length || 0,
+        tags: data.draft.campaign_tags || [],
         total_audience: data.draft.total_matched_audience,
       });
+      
+      // Update draft state
       setDraft(data.draft);
 
       // Auto-select first audience for detail view if none selected
+      // OR update selected audience with latest data if it exists
       if (data.draft.audiences.length > 0) {
         const currentSelected = selectedAudienceDetail?.audience_id;
         const foundAudience = data.draft.audiences.find((a: DraftAudience) => a.audience_id === currentSelected);
         if (foundAudience) {
-          // Update selected audience with latest data
+          // Update selected audience with latest data from server
+          console.log('🔄 Updating selected audience detail with fresh data from server');
           setSelectedAudienceDetail(foundAudience);
         } else if (!selectedAudienceDetail) {
+          // No selection yet, select first one
           setSelectedAudienceDetail(data.draft.audiences[0]);
         }
       }
@@ -213,19 +221,24 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
 
       console.log('✅ Content saved successfully');
       
-      // Refresh draft data from server first to get latest data
-      await fetchDraft();
-      
-      // Update selected audience detail after refresh to ensure it shows updated content
-      if (draft) {
-        const updatedAudience = draft.audiences.find(aud => aud.audience_id === audienceId);
-        if (updatedAudience && selectedAudienceDetail?.audience_id === audienceId) {
-          setSelectedAudienceDetail(updatedAudience);
-        }
-      }
-
+      // Close edit mode first
       setEditingContent(null);
       setEditedContent('');
+      
+      // Refresh draft data from server to get latest data
+      await fetchDraft();
+      
+      // After fetchDraft completes, update selected audience detail with fresh data
+      // Use a small delay to ensure state has updated
+      setTimeout(() => {
+        if (draft) {
+          const updatedAudience = draft.audiences.find(aud => aud.audience_id === audienceId);
+          if (updatedAudience) {
+            console.log('🔄 Updating selected audience detail with fresh data');
+            setSelectedAudienceDetail(updatedAudience);
+          }
+        }
+      }, 300);
     } catch (error) {
       console.error('Error saving edit:', error);
       alert('Failed to save changes. Please try again.');

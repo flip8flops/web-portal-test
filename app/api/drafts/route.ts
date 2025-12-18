@@ -141,9 +141,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     console.log('✅ Using draft campaign ID:', latestDraftCampaignId);
 
-    // Get campaign info
-    // campaign table doesn't have SELECT permission for anon role
-    // So we'll get info from campaign_status_updates metadata (which we know works)
+    // Get campaign info from campaign table (now has SELECT permission)
     console.log('🔍 Fetching campaign info for ID:', latestDraftCampaignId);
     
     let campaignName = 'Untitled Campaign';
@@ -151,11 +149,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     let campaignImageUrl = null;
     let campaignCreatedAt = new Date().toISOString();
     let campaignUpdatedAt = new Date().toISOString();
-    
-    // Try to get campaign info from campaign table FIRST (now has SELECT permission)
-    // This is the primary source for all campaign data
-    
-    // Try to get campaign info from campaign table (now has SELECT permission)
+    let campaignTags: string[] = [];
+    let originNotes = '';
+    let totalMatchedAudience = 0;
+
+    // Try to get campaign info from campaign table FIRST
     const { data: campaignTableData, error: campaignError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign')
@@ -163,12 +161,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .eq('id', latestDraftCampaignId)
       .single();
 
-    let campaignTags: string[] = [];
-    let originNotes = '';
-    let totalMatchedAudience = 0;
-
-    if (!campaignError && campaignTableData) {
-      // Extract additional info from meta FIRST (before using direct fields)
+    if (campaignError) {
+      console.error('❌ Error fetching campaign table:', campaignError);
+      console.error('   Code:', campaignError.code);
+      console.error('   Message:', campaignError.message);
+      console.log('⚠️ Cannot access campaign table, will try fallback');
+    } else if (campaignTableData) {
+      console.log('✅ Campaign table data fetched successfully');
+      console.log('   Raw name:', campaignTableData.name || 'NULL');
+      console.log('   Raw objective:', campaignTableData.objective ? campaignTableData.objective.substring(0, 50) + '...' : 'NULL');
+      console.log('   Has meta:', !!campaignTableData.meta);
+      console.log('   Has matchmaker_strategy:', !!campaignTableData.matchmaker_strategy);
+      
+      // Extract from meta FIRST (most reliable source)
       const meta = campaignTableData.meta || {};
       const researchPayload = meta.research_payload || {};
       const campaignBrief = researchPayload.campaign_brief || {};
@@ -176,15 +181,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // Get title from meta.campaign_brief.title FIRST, then fallback to campaign.name
       if (campaignBrief && campaignBrief.title) {
         campaignName = campaignBrief.title;
+        console.log('   ✅ Title from meta.campaign_brief.title:', campaignName);
+      } else if (campaignTableData.name) {
+        campaignName = campaignTableData.name;
+        console.log('   ✅ Title from campaign.name:', campaignName);
       } else {
-        campaignName = campaignTableData.name || campaignName;
+        console.log('   ⚠️ No title found in meta or campaign.name');
       }
       
       // Get objective from meta.campaign_brief.objective FIRST, then fallback to campaign.objective
       if (campaignBrief && campaignBrief.objective) {
         campaignObjective = campaignBrief.objective;
+        console.log('   ✅ Objective from meta.campaign_brief.objective');
+      } else if (campaignTableData.objective) {
+        campaignObjective = campaignTableData.objective;
+        console.log('   ✅ Objective from campaign.objective');
       } else {
-        campaignObjective = campaignTableData.objective || campaignObjective;
+        console.log('   ⚠️ No objective found');
       }
       
       // Get other fields
@@ -194,28 +207,42 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       
       // Get origin notes
       originNotes = meta.origin_raw_admin_notes || '';
+      console.log('   Origin Notes:', originNotes ? originNotes.substring(0, 50) + '...' : 'NOT FOUND');
       
       // Get total matched audience
       const matchmakerResult = meta.matchmaker_result || {};
       totalMatchedAudience = matchmakerResult.total_matched || 0;
+      console.log('   Total Matched:', totalMatchedAudience);
       
-      // Get tags from matchmaker_strategy or meta
-      if (campaignTableData.matchmaker_strategy && campaignTableData.matchmaker_strategy.tags) {
-        campaignTags = campaignTableData.matchmaker_strategy.tags;
-      } else if (campaignBrief && campaignBrief.tags) {
-        campaignTags = campaignBrief.tags;
+      // Get tags from matchmaker_strategy FIRST (most reliable), then meta
+      if (campaignTableData.matchmaker_strategy) {
+        if (Array.isArray(campaignTableData.matchmaker_strategy.tags)) {
+          campaignTags = campaignTableData.matchmaker_strategy.tags;
+          console.log('   ✅ Tags from matchmaker_strategy.tags:', campaignTags.length, 'tags');
+        } else {
+          console.log('   ⚠️ matchmaker_strategy.tags is not an array:', typeof campaignTableData.matchmaker_strategy.tags);
+        }
       }
       
-      console.log('✅ Campaign info fetched from campaign table:', campaignTableData.id);
-      console.log('   Campaign Name:', campaignName || 'MISSING');
-      console.log('   Title from:', campaignBrief?.title ? 'meta.campaign_brief.title' : (campaignTableData.name ? 'campaign.name' : 'fallback'));
-      console.log('   Objective:', campaignObjective ? campaignObjective.substring(0, 50) + '...' : 'MISSING');
-      console.log('   Origin Notes:', originNotes ? originNotes.substring(0, 50) + '...' : 'MISSING');
-      console.log('   Total Matched:', totalMatchedAudience || 0);
-      console.log('   Tags:', campaignTags.length, 'tags found', campaignTags);
-    } else if (campaignError) {
-      console.log('⚠️ Cannot access campaign table:', campaignError.code);
-      console.log('   Using data from campaign_status_updates metadata instead');
+      // Fallback to meta tags if matchmaker_strategy doesn't have tags
+      if (campaignTags.length === 0 && campaignBrief && Array.isArray(campaignBrief.tags)) {
+        campaignTags = campaignBrief.tags;
+        console.log('   ✅ Tags from meta.campaign_brief.tags:', campaignTags.length, 'tags');
+      }
+      
+      if (campaignTags.length === 0) {
+        console.log('   ⚠️ No tags found in matchmaker_strategy or meta');
+      }
+      
+      console.log('✅ Final campaign data:', {
+        name: campaignName,
+        objective: campaignObjective ? campaignObjective.substring(0, 30) + '...' : 'MISSING',
+        originNotes: originNotes ? 'EXISTS' : 'MISSING',
+        tags: campaignTags.length,
+        totalMatched: totalMatchedAudience,
+      });
+    } else {
+      console.log('⚠️ Campaign table data is null');
     }
 
     // Get campaign audiences with broadcast_content
@@ -270,7 +297,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const { data: detailsData, error: detailsError } = await supabase
         .schema('citia_mora_datamart')
         .from('audience')
-        .select('id, full_name, source_contact_id, wa_opt_in, telegram_username')
+        .select('id, full_name, source_contact_id, wa_opt_in, telegram_username, phone_e164')
         .in('id', audienceIds);
 
       if (detailsError) {
@@ -301,13 +328,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const channel = isWhatsApp ? 'whatsapp' : isTelegram ? 'telegram' : 'whatsapp'; // Default to whatsapp
       
       // Determine "send to" value based on channel
-      // For WhatsApp: use source_contact_id (format: wa-628xxx contains phone number)
+      // For WhatsApp: use phone_e164 FIRST (proper phone number), then fallback to source_contact_id
       // For Telegram: use telegram_username with @ prefix, or source_contact_id
       let sendTo = '';
       if (channel === 'whatsapp') {
-        // source_contact_id might be in format "wa-628xxx" (extract phone: 628xxx) or "dummy:1"
-        // If starts with "wa-", extract the number part
-        if (audienceDetail.source_contact_id && audienceDetail.source_contact_id.startsWith('wa-')) {
+        // Prefer phone_e164 (format: +628xxx) for WhatsApp
+        if (audienceDetail.phone_e164) {
+          sendTo = audienceDetail.phone_e164;
+        } else if (audienceDetail.source_contact_id && audienceDetail.source_contact_id.startsWith('wa-')) {
+          // Fallback: extract from source_contact_id format "wa-628xxx"
           sendTo = audienceDetail.source_contact_id.substring(3); // Remove "wa-" prefix
         } else {
           sendTo = audienceDetail.source_contact_id || '';
@@ -325,7 +354,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         sendTo = audienceDetail.source_contact_id || '';
       }
       
-      console.log('   Audience:', audienceDetail.full_name || 'Unknown', '- Channel:', channel, '- Send To:', sendTo);
+      console.log('   Audience:', audienceDetail.full_name || 'Unknown', '- Channel:', channel, '- Send To:', sendTo, '- Phone E164:', audienceDetail.phone_e164 || 'N/A');
 
       // Map guardrails tag: 'approved' -> 'passed'
       let guardrailsTag = guardrails.tag || 'needs_review';
