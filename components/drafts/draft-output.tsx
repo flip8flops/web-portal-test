@@ -223,53 +223,58 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
         return;
       }
 
-      console.log('✅ Content saved successfully');
+      console.log('✅ Content saved successfully to database');
       
-      // Close edit mode first
+      // IMPORTANT: Don't re-fetch from server due to cache issues
+      // Instead, update local state directly with the saved content
+      console.log('🔄 Updating local state directly (bypassing server fetch to avoid cache)');
+      
+      // Update the audience in the audiences array
+      const updatedAudiences = draft.audiences.map((aud) => {
+        if (aud.audience_id === audienceId) {
+          const updated = {
+            ...aud,
+            broadcast_content: editedContent,
+            character_count: editedContent.length,
+            updated_at: new Date().toISOString(),
+          };
+          console.log('   Updated audience:', {
+            audience_id: aud.audience_id,
+            old_content: aud.broadcast_content.substring(0, 30) + '...',
+            new_content: editedContent.substring(0, 30) + '...',
+            old_length: aud.broadcast_content.length,
+            new_length: editedContent.length,
+          });
+          return updated;
+        }
+        return aud;
+      });
+      
+      // Update draft state with new audiences array
+      setDraft({
+        ...draft,
+        audiences: updatedAudiences,
+      });
+      
+      // Update selected audience detail immediately
+      if (selectedAudienceDetail?.audience_id === audienceId) {
+        const updatedDetail = {
+          ...selectedAudienceDetail,
+          broadcast_content: editedContent,
+          character_count: editedContent.length,
+          updated_at: new Date().toISOString(),
+        };
+        
+        console.log('✅ Updated selected audience detail locally');
+        console.log('   Content preview:', updatedDetail.broadcast_content.substring(0, 50));
+        console.log('   Content length:', updatedDetail.character_count);
+        
+        setSelectedAudienceDetail(updatedDetail);
+      }
+      
+      // Close edit mode
       setEditingContent(null);
       setEditedContent('');
-      
-      // Store campaign_id before async operations to avoid stale closure
-      const currentCampaignId = draft.campaign_id;
-      
-      // Re-fetch draft data directly to get the absolute latest data from server
-      console.log('🔄 Re-fetching draft data after save...');
-      const refreshResponse = await fetch(`/api/drafts?campaign_id=${currentCampaignId}`);
-      
-      if (!refreshResponse.ok) {
-        console.error('❌ Failed to refresh draft data after save');
-        // Still try to use fetchDraft as fallback
-        await fetchDraft();
-        return;
-      }
-      
-      const refreshData = await refreshResponse.json();
-      
-      if (refreshData.draft) {
-        console.log('✅ Fresh draft data received after save');
-        console.log('   Audiences count:', refreshData.draft.audiences?.length || 0);
-        
-        // Update draft state with fresh data
-        setDraft(refreshData.draft);
-        
-        // Find and update selected audience detail with fresh data
-        const updatedAudience = refreshData.draft.audiences.find((aud: DraftAudience) => aud.audience_id === audienceId);
-        if (updatedAudience) {
-          console.log('🔄 Updating selected audience detail with fresh data from server');
-          console.log('   Audience ID:', updatedAudience.audience_id);
-          console.log('   Updated content preview:', updatedAudience.broadcast_content?.substring(0, 80) || 'EMPTY');
-          console.log('   Content length:', updatedAudience.broadcast_content?.length || 0);
-          
-          // Force update selected audience detail
-          setSelectedAudienceDetail(updatedAudience);
-        } else {
-          console.warn('⚠️ Updated audience not found in fresh data. Audience ID:', audienceId);
-          console.warn('   Available audience IDs:', refreshData.draft.audiences?.map((a: DraftAudience) => a.audience_id) || []);
-        }
-      } else {
-        console.warn('⚠️ No draft in refresh response, using fetchDraft as fallback');
-        await fetchDraft();
-      }
     } catch (error) {
       console.error('Error saving edit:', error);
       alert('Failed to save changes. Please try again.');
