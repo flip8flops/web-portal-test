@@ -300,7 +300,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           campaign_id: latestDraftCampaignId,
           campaign_name: campaignName,
           campaign_objective: campaignObjective,
-          campaign_image_url: campaignImageUrl,
           audiences: [], // Empty array if we can't access campaign_audience
           created_at: campaignCreatedAt,
           updated_at: campaignUpdatedAt,
