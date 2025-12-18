@@ -32,7 +32,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     console.log('💾 Updating broadcast_content for:', { campaign_id, audience_id });
     console.log('   Content to save (first 100 chars):', broadcast_content.substring(0, 100));
     console.log('   Content length:', broadcast_content.length);
-    console.log('   Timestamp before update:', new Date().toISOString());
+    const beforeUpdateTime = new Date();
+    console.log('   Timestamp before update:', beforeUpdateTime.toISOString());
 
     // Create a fresh client instance for update to avoid caching issues
     const updateSupabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -46,9 +47,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
 
     const updateTimestamp = new Date().toISOString();
+    console.log('   Update timestamp to set:', updateTimestamp);
     
     // Update broadcast_content in database
-    const { data: updateData, error } = await updateSupabase
+    const { data: updateData, error, count } = await updateSupabase
       .schema('citia_mora_datamart')
       .from('campaign_audience')
       .update({
@@ -57,7 +59,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       })
       .eq('campaign_id', campaign_id)
       .eq('audience_id', audience_id)
-      .select('broadcast_content, updated_at'); // Select to verify update
+      .select('id, broadcast_content, updated_at'); // Select to verify update
 
     if (error) {
       console.error('❌ Error updating content:', error);
