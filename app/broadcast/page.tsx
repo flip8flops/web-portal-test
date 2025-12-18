@@ -78,7 +78,7 @@ export default function BroadcastPage() {
       const { data: statusData, error } = await supabase
         .schema('citia_mora_datamart')
         .from('campaign_status_updates')
-        .select('agent_name, status, message, updated_at')
+        .select('agent_name, status, message, updated_at, metadata')
         .eq('campaign_id', cid)
         .order('updated_at', { ascending: false })
         .limit(100);
