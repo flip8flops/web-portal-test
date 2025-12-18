@@ -226,12 +226,29 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
               const workflowPoint = metadata.workflow_point || '';
               
               // Check if this is QC phase guardrails:
-              // 1. workflow_point indicates QC phase, OR
+              // 1. workflow_point indicates QC phase (guardrails_checking, guardrails_completed, guardrails_error), OR
               // 2. It comes after content_maker_agent completed
+              // Initial guardrails have workflow_point: start, guardrails_accepted, guardrails_rejected
               const isQC = workflowPoint.includes('guardrails_checking') || 
                           workflowPoint.includes('guardrails_completed') ||
                           workflowPoint.includes('guardrails_error') ||
                           (contentMakerTime && timestamp > contentMakerTime);
+              
+              // Ensure initial guardrails are NOT marked as QC
+              // Initial guardrails have: start, guardrails_accepted, guardrails_rejected
+              const isInitial = workflowPoint === 'start' || 
+                                workflowPoint.includes('guardrails_accepted') ||
+                                workflowPoint.includes('guardrails_rejected');
+              
+              // If it's clearly initial, force it to NOT be QC
+              if (isInitial) {
+                // This is definitely initial guardrails
+                if (!latestStatuses['guardrails'] || 
+                    timestamp > new Date(latestStatuses['guardrails'].updated_at)) {
+                  latestStatuses['guardrails'] = update as StatusUpdate;
+                }
+                return; // Skip QC check for initial guardrails
+              }
               
               if (isQC) {
                 // This is QC guardrails - store as guardrails_qc

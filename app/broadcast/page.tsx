@@ -242,10 +242,12 @@ export default function BroadcastPage() {
               }
 
               // First, ALWAYS check for latest draft campaign (regardless of localStorage)
+              // IMPORTANT: This check verifies campaign.status is actually 'content_drafted'
               const latestDraftId = await findLatestDraftCampaign();
               console.log('🔍 Initial check - Latest draft campaign ID:', latestDraftId);
               
               if (latestDraftId) {
+                // Double-check state to ensure it's still drafted (not rejected/approved)
                 const draftState = await checkCampaignState(latestDraftId);
                 console.log('📋 Found campaign:', latestDraftId, 'State:', draftState);
                 
@@ -274,6 +276,7 @@ export default function BroadcastPage() {
                       setActiveTab('input');
                     }
                     
+                    // IMPORTANT: Clear localStorage when campaign is not drafted
                     if (typeof window !== 'undefined' && window.localStorage) {
                       localStorage.removeItem('current_campaign_id');
                       localStorage.removeItem('current_execution_id');
@@ -283,30 +286,60 @@ export default function BroadcastPage() {
                 }
               } else {
                 console.log('ℹ️ No draft campaign found');
+                // IMPORTANT: If no draft found, clear any saved campaign_id from localStorage
+                // This prevents showing rejected/approved campaigns after refresh
+                if (typeof window !== 'undefined' && window.localStorage) {
+                  const savedId = localStorage.getItem('current_campaign_id');
+                  if (savedId) {
+                    console.log('🧹 Clearing saved campaign_id from localStorage (no draft found):', savedId);
+                    localStorage.removeItem('current_campaign_id');
+                    localStorage.removeItem('current_execution_id');
+                    localStorage.removeItem('current_campaign_timestamp');
+                  }
+                }
               }
               
               // Also check saved campaign if no draft found or if we want to restore processing state
+              // BUT: Only if we haven't already cleared it above
               if (savedCampaignId || savedExecutionId) {
-                // No draft found, check saved campaign
+                // IMPORTANT: Verify saved campaign is still valid (not rejected/approved)
                 console.log('✅ Found saved campaign session, verifying status...');
                 
                 const state = await checkCampaignState(savedCampaignId);
+                console.log('📋 Saved campaign state:', savedCampaignId, '→', state);
+                
                 if (mounted) {
-                  setCampaignState(state);
-                  
-                  if (state === 'processing') {
+                  // IMPORTANT: If saved campaign is rejected/approved, clear it
+                  if (state === 'rejected' || state === 'approved') {
+                    console.log('⚠️ Saved campaign is', state, '- clearing from localStorage');
+                    setCampaignId(null);
+                    setExecutionId(null);
+                    setDraftCampaignId(null);
+                    setCampaignState('idle');
+                    setActiveTab('input');
+                    if (typeof window !== 'undefined' && window.localStorage) {
+                      localStorage.removeItem('current_campaign_id');
+                      localStorage.removeItem('current_execution_id');
+                      localStorage.removeItem('current_campaign_timestamp');
+                    }
+                  } else if (state === 'processing') {
                     setCampaignId(savedCampaignId);
                     setExecutionId(savedExecutionId);
+                    setCampaignState('processing');
                     setActiveTab('input');
                   } else if (state === 'drafted') {
-                    setCampaignId(savedCampaignId);
-                    setDraftCampaignId(savedCampaignId);
-                    setActiveTab('output');
+                    // Only set if we didn't already set it from latestDraftId above
+                    if (!latestDraftId || latestDraftId !== savedCampaignId) {
+                      setCampaignId(savedCampaignId);
+                      setDraftCampaignId(savedCampaignId);
+                      setCampaignState('drafted');
+                    }
                   } else {
                     // Finished or idle, clear
                     setCampaignId(null);
                     setExecutionId(null);
                     setDraftCampaignId(null);
+                    setCampaignState('idle');
                     setActiveTab('input');
                     if (typeof window !== 'undefined' && window.localStorage) {
                       localStorage.removeItem('current_campaign_id');
@@ -316,9 +349,8 @@ export default function BroadcastPage() {
                   }
                 }
               } else {
-                // No saved campaign and no draft found above, but check one more time
-                // (This handles case where findLatestDraftCampaign was called but returned null)
-                console.log('ℹ️ No saved campaign, checking for drafts one more time...');
+                // No saved campaign and no draft found above
+                console.log('ℹ️ No saved campaign, state is idle');
               }
             } catch (err) {
               console.error('Error restoring campaign session:', err);
@@ -369,8 +401,14 @@ export default function BroadcastPage() {
           setDraftCampaignId(latestDraftId);
           setCampaignState('drafted');
           setCampaignId(latestDraftId);
+          
+          // Save to localStorage for persistence
+          if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.setItem('current_campaign_id', latestDraftId);
+            localStorage.setItem('current_campaign_timestamp', Date.now().toString());
+          }
         } else {
-          // Campaign is not drafted - clear everything
+          // Campaign is not drafted (rejected/approved) - clear everything
           console.log('⚠️ Campaign is', draftState, '- not a draft, clearing state');
           setDraftCampaignId(null);
           setCampaignId(null);
@@ -380,6 +418,7 @@ export default function BroadcastPage() {
             setActiveTab('input');
           }
           
+          // IMPORTANT: Clear localStorage when campaign is not drafted
           if (typeof window !== 'undefined' && window.localStorage) {
             localStorage.removeItem('current_campaign_id');
             localStorage.removeItem('current_execution_id');
@@ -392,6 +431,18 @@ export default function BroadcastPage() {
         setDraftCampaignId(null);
         setCampaignId(null);
         setCampaignState('idle');
+        
+        // IMPORTANT: Also clear localStorage if no draft found
+        // This prevents showing rejected/approved campaigns after refresh
+        if (typeof window !== 'undefined' && window.localStorage) {
+          const savedId = localStorage.getItem('current_campaign_id');
+          if (savedId) {
+            console.log('🧹 Periodic check: Clearing saved campaign_id (no draft found):', savedId);
+            localStorage.removeItem('current_campaign_id');
+            localStorage.removeItem('current_execution_id');
+            localStorage.removeItem('current_campaign_timestamp');
+          }
+        }
       }
     };
 

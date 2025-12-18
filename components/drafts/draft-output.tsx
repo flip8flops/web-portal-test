@@ -427,7 +427,7 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
             <CardTitle>Audience List</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2 max-h-[600px] overflow-y-auto">
+            <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2">
               {draft.audiences.map((audience) => (
                 <div
                   key={audience.audience_id}
