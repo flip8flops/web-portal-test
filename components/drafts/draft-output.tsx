@@ -229,33 +229,47 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
       setEditingContent(null);
       setEditedContent('');
       
-      // Refresh draft data from server to get latest data
-      // fetchDraft will update the draft state, then we'll update selectedAudienceDetail
-      await fetchDraft();
+      // Store campaign_id before async operations to avoid stale closure
+      const currentCampaignId = draft.campaign_id;
       
-      // Wait a bit for state to update, then update selected audience detail
-      // We need to re-fetch the draft to get the latest data
-      setTimeout(async () => {
-        // Re-fetch to ensure we have the absolute latest data
-        const refreshResponse = await fetch(`/api/drafts?campaign_id=${draft.campaign_id}`);
-        if (refreshResponse.ok) {
-          const refreshData = await refreshResponse.json();
-          if (refreshData.draft) {
-            // Update draft state with fresh data
-            setDraft(refreshData.draft);
-            
-            // Find and update selected audience detail
-            const updatedAudience = refreshData.draft.audiences.find((aud: DraftAudience) => aud.audience_id === audienceId);
-            if (updatedAudience) {
-              console.log('🔄 Updating selected audience detail with fresh data from server');
-              console.log('   Updated content preview:', updatedAudience.broadcast_content?.substring(0, 50) || 'EMPTY');
-              setSelectedAudienceDetail(updatedAudience);
-            } else {
-              console.warn('⚠️ Updated audience not found in fresh data');
-            }
-          }
+      // Re-fetch draft data directly to get the absolute latest data from server
+      console.log('🔄 Re-fetching draft data after save...');
+      const refreshResponse = await fetch(`/api/drafts?campaign_id=${currentCampaignId}`);
+      
+      if (!refreshResponse.ok) {
+        console.error('❌ Failed to refresh draft data after save');
+        // Still try to use fetchDraft as fallback
+        await fetchDraft();
+        return;
+      }
+      
+      const refreshData = await refreshResponse.json();
+      
+      if (refreshData.draft) {
+        console.log('✅ Fresh draft data received after save');
+        console.log('   Audiences count:', refreshData.draft.audiences?.length || 0);
+        
+        // Update draft state with fresh data
+        setDraft(refreshData.draft);
+        
+        // Find and update selected audience detail with fresh data
+        const updatedAudience = refreshData.draft.audiences.find((aud: DraftAudience) => aud.audience_id === audienceId);
+        if (updatedAudience) {
+          console.log('🔄 Updating selected audience detail with fresh data from server');
+          console.log('   Audience ID:', updatedAudience.audience_id);
+          console.log('   Updated content preview:', updatedAudience.broadcast_content?.substring(0, 80) || 'EMPTY');
+          console.log('   Content length:', updatedAudience.broadcast_content?.length || 0);
+          
+          // Force update selected audience detail
+          setSelectedAudienceDetail(updatedAudience);
+        } else {
+          console.warn('⚠️ Updated audience not found in fresh data. Audience ID:', audienceId);
+          console.warn('   Available audience IDs:', refreshData.draft.audiences?.map((a: DraftAudience) => a.audience_id) || []);
         }
-      }, 500);
+      } else {
+        console.warn('⚠️ No draft in refresh response, using fetchDraft as fallback');
+        await fetchDraft();
+      }
     } catch (error) {
       console.error('Error saving edit:', error);
       alert('Failed to save changes. Please try again.');
