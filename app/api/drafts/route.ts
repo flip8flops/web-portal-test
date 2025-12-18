@@ -62,13 +62,36 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         console.error('❌ Error code:', statusError.code);
         console.error('❌ Error message:', statusError.message);
       } else if (statusData && statusData.length > 0) {
-        // Find the latest one that has a valid campaign_id
-        const latestStatus = statusData.find((s: any) => s.campaign_id);
-        if (latestStatus && latestStatus.campaign_id) {
-          latestDraftCampaignId = latestStatus.campaign_id;
-          console.log('✅ Found draft campaign from campaign_status_updates:', latestDraftCampaignId);
-        } else {
-          console.log('ℹ️ Found status updates but no valid campaign_id');
+        // Find the latest one that has a valid campaign_id AND check if campaign status is still content_drafted
+        for (const status of statusData) {
+          if (!status.campaign_id) continue;
+          
+          // CRITICAL: Check campaign.status to ensure it's still content_drafted (not rejected/approved)
+          console.log('🔍 Checking campaign status for:', status.campaign_id);
+          const { data: campaignCheck, error: checkError } = await supabase
+            .schema('citia_mora_datamart')
+            .from('campaign')
+            .select('id, status')
+            .eq('id', status.campaign_id)
+            .single();
+          
+          if (checkError) {
+            console.warn('⚠️ Cannot check campaign status:', checkError.message);
+            continue; // Skip this one if we can't check
+          }
+          
+          if (campaignCheck && campaignCheck.status === 'content_drafted') {
+            latestDraftCampaignId = status.campaign_id;
+            console.log('✅ Found draft campaign from campaign_status_updates:', latestDraftCampaignId);
+            console.log('   Campaign status confirmed: content_drafted');
+            break; // Found valid draft, stop searching
+          } else {
+            console.log(`   Campaign ${status.campaign_id} status is: ${campaignCheck?.status || 'unknown'} - skipping (not content_drafted)`);
+          }
+        }
+        
+        if (!latestDraftCampaignId) {
+          console.log('ℹ️ Found status updates but no campaign with status="content_drafted"');
         }
       } else {
         console.log('ℹ️ No content_maker_agent completed status found, trying alternative approach...');
@@ -89,8 +112,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           });
           
           if (draftStatus && draftStatus.campaign_id) {
-            latestDraftCampaignId = draftStatus.campaign_id;
-            console.log('✅ Found draft campaign from workflow_point metadata:', latestDraftCampaignId);
+            // CRITICAL: Verify campaign status is still content_drafted
+            const { data: campaignCheck, error: checkError } = await supabase
+              .schema('citia_mora_datamart')
+              .from('campaign')
+              .select('id, status')
+              .eq('id', draftStatus.campaign_id)
+              .single();
+            
+            if (!checkError && campaignCheck && campaignCheck.status === 'content_drafted') {
+              latestDraftCampaignId = draftStatus.campaign_id;
+              console.log('✅ Found draft campaign from workflow_point metadata:', latestDraftCampaignId);
+              console.log('   Campaign status confirmed: content_drafted');
+            } else {
+              console.log(`   Campaign ${draftStatus.campaign_id} status is: ${campaignCheck?.status || 'unknown'} - skipping (not content_drafted)`);
+            }
           }
         }
         
@@ -111,32 +147,53 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             console.error('❌ Error code:', campaignError.code);
             console.error('❌ Error message:', campaignError.message);
             console.log('⚠️ Permission error on campaign table - check Supabase grants');
-          } else if (campaignData && campaignData.id) {
+          } else if (campaignData && campaignData.id && campaignData.status === 'content_drafted') {
             latestDraftCampaignId = campaignData.id;
             console.log('✅ Found draft campaign from campaign.status:', latestDraftCampaignId);
+            console.log('   Campaign status confirmed: content_drafted');
           } else {
             console.log('ℹ️ No campaign found with status="content_drafted"');
+            if (campaignData) {
+              console.log(`   Found campaign but status is: ${campaignData.status} (not content_drafted)`);
+            }
           }
         }
       }
     }
 
     if (!latestDraftCampaignId) {
-      console.log('⚠️ No draft campaign ID found, returning null');
-      console.log('⚠️ This could mean:');
-      console.log('   1. No campaign with status="content_drafted" exists');
-      console.log('   2. SUPABASE_SERVICE_ROLE_KEY is not set (check Coolify environment variables)');
-      console.log('   3. Permission issue accessing citia_mora_datamart.campaign table');
+      console.log('✅ No draft campaign found (all campaigns are either approved, rejected, or not yet drafted)');
       return NextResponse.json({
         draft: null,
         campaign_id: null,
         message: 'No draft campaign found',
-        debug: {
-          hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-          hasAnonKey: !!process.env.SUPABASE_ANON_KEY,
-          supabaseUrl: supabaseUrl ? 'SET' : 'MISSING',
-        }
       });
+    }
+
+    // FINAL VERIFICATION: Double-check that the campaign is still content_drafted
+    // This ensures we don't return a campaign that was just rejected/approved
+    console.log('🔍 Final verification: Checking campaign status one more time...');
+    const { data: finalCheck, error: finalCheckError } = await supabase
+      .schema('citia_mora_datamart')
+      .from('campaign')
+      .select('id, status')
+      .eq('id', latestDraftCampaignId)
+      .single();
+    
+    if (finalCheckError) {
+      console.warn('⚠️ Cannot verify campaign status:', finalCheckError.message);
+      // Continue anyway - might be permission issue
+    } else if (finalCheck) {
+      if (finalCheck.status !== 'content_drafted') {
+        console.log(`❌ Campaign ${latestDraftCampaignId} status is "${finalCheck.status}", not "content_drafted" - returning null`);
+        return NextResponse.json({
+          draft: null,
+          campaign_id: null,
+          message: 'No draft campaign found (campaign status is not content_drafted)',
+        });
+      } else {
+        console.log('✅ Final verification passed: Campaign status is content_drafted');
+      }
     }
 
     console.log('✅ Using draft campaign ID:', latestDraftCampaignId);

@@ -213,49 +213,38 @@ export default function BroadcastPage() {
               
               if (latestDraftId) {
                 const draftState = await checkCampaignState(latestDraftId);
-                console.log('📋 Found draft campaign:', latestDraftId, 'State:', draftState);
+                console.log('📋 Found campaign:', latestDraftId, 'State:', draftState);
                 
                 if (mounted) {
-                  setDraftCampaignId(latestDraftId);
-                  setCampaignState(draftState);
-                  // IMPORTANT: Always set campaignId so StatusDisplay can show status
-                  setCampaignId(latestDraftId);
-                  
+                  // Only set as draft if state is actually 'drafted'
                   if (draftState === 'drafted') {
                     console.log('✅ Setting draft campaign');
-                    // Don't auto-switch tabs - let user stay where they are
-                    // User can manually switch to output tab if they want to see the draft
+                    setDraftCampaignId(latestDraftId);
+                    setCampaignState('drafted');
+                    setCampaignId(latestDraftId);
+                    
                     // Save to localStorage
                     if (typeof window !== 'undefined' && window.localStorage) {
                       localStorage.setItem('current_campaign_id', latestDraftId);
                       localStorage.setItem('current_campaign_timestamp', Date.now().toString());
                     }
-                  } else if (draftState === 'approved' || draftState === 'rejected') {
-                    // Clear draft, allow new campaign
-                    console.log('⚠️ Draft campaign is', draftState, '- clearing');
+                  } else {
+                    // Campaign is not drafted (approved/rejected/idle) - clear everything
+                    console.log('⚠️ Campaign is', draftState, '- not a draft, clearing state');
                     setDraftCampaignId(null);
                     setCampaignId(null);
+                    setCampaignState('idle');
+                    
                     // Only switch if currently on output tab
                     if (activeTab === 'output') {
                       setActiveTab('input');
                     }
+                    
                     if (typeof window !== 'undefined' && window.localStorage) {
                       localStorage.removeItem('current_campaign_id');
                       localStorage.removeItem('current_execution_id');
                       localStorage.removeItem('current_campaign_timestamp');
                     }
-                  } else if (draftState === 'processing') {
-                    // Still processing - show status in input tab
-                    console.log('⏳ Draft campaign is still processing');
-                    // Only switch if currently on output tab
-                    if (activeTab === 'output') {
-                      setActiveTab('input');
-                    }
-                  } else {
-                    // Unknown state, but we have a draft campaign - assume drafted
-                    console.log('⚠️ Unknown draft state (' + draftState + '), assuming drafted');
-                    setCampaignState('drafted');
-                    // Don't auto-switch - let user stay where they are
                   }
                 }
               } else {
