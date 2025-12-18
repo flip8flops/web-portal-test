@@ -146,7 +146,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     
     let campaignName = 'Untitled Campaign';
     let campaignObjective = '';
-    let campaignImageUrl = null;
     let campaignCreatedAt = new Date().toISOString();
     let campaignUpdatedAt = new Date().toISOString();
     let campaignTags: string[] = [];
@@ -227,7 +226,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       }
       
       // Get other fields
-      campaignImageUrl = campaignTableData.image_url || campaignImageUrl;
       campaignCreatedAt = campaignTableData.created_at || campaignCreatedAt;
       campaignUpdatedAt = campaignTableData.updated_at || campaignUpdatedAt;
       
@@ -427,7 +425,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         campaign_id: latestDraftCampaignId,
         campaign_name: campaignName,
         campaign_objective: campaignObjective,
-        campaign_image_url: campaignImageUrl,
         campaign_tags: campaignTags,
         origin_notes: originNotes,
         total_matched_audience: totalMatchedAudience,
