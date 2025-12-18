@@ -285,32 +285,55 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       },
     });
     
-    // First, let's check ALL rows for this campaign to see what we have
-    console.log('🔍 Checking ALL campaign_audience rows for this campaign...');
+    // First, let's check ALL rows for this campaign (including NULL/empty broadcast_content)
+    console.log('🔍 Checking ALL campaign_audience rows for this campaign (including NULL)...');
     const { data: allRows, error: allRowsError } = await fetchSupabase
       .schema('citia_mora_datamart')
       .from('campaign_audience')
-      .select('audience_id, broadcast_content, updated_at')
-      .eq('campaign_id', latestDraftCampaignId);
+      .select('id, audience_id, broadcast_content, updated_at, created_at')
+      .eq('campaign_id', latestDraftCampaignId)
+      .order('updated_at', { ascending: false }); // Order by updated_at DESC to see latest first
     
     if (!allRowsError && allRows) {
       console.log(`   Found ${allRows.length} total rows for this campaign:`);
       allRows.forEach((row, idx) => {
         console.log(`   Row ${idx + 1}:`, {
+          id: row.id,
           audience_id: row.audience_id,
-          content_preview: row.broadcast_content?.substring(0, 50) || 'NULL',
+          content_preview: row.broadcast_content?.substring(0, 50) || 'NULL/EMPTY',
+          content_length: row.broadcast_content?.length || 0,
+          updated_at: row.updated_at,
+          created_at: row.created_at,
+        });
+      });
+      
+      // Group by audience_id and find the latest one for each
+      const latestByAudience = new Map();
+      allRows.forEach((row) => {
+        const existing = latestByAudience.get(row.audience_id);
+        if (!existing || new Date(row.updated_at) > new Date(existing.updated_at)) {
+          latestByAudience.set(row.audience_id, row);
+        }
+      });
+      
+      console.log(`   Latest row per audience_id (from all rows):`);
+      latestByAudience.forEach((row, audienceId) => {
+        console.log(`   Audience ${audienceId}:`, {
+          id: row.id,
+          content_preview: row.broadcast_content?.substring(0, 50) || 'NULL/EMPTY',
           updated_at: row.updated_at,
         });
       });
     }
     
-    // Now fetch with proper ordering - get the LATEST updated_at for each audience_id
-    // Use DISTINCT ON to get only the latest row per audience_id
-    console.log('🔍 Fetching latest broadcast_content for each audience...');
+    // Now fetch with proper filtering - get rows with broadcast_content
+    // Then we'll deduplicate to get only the latest per audience_id
+    console.log('🔍 Fetching rows with broadcast_content...');
     const { data: audienceData, error: audienceError } = await fetchSupabase
       .schema('citia_mora_datamart')
       .from('campaign_audience')
       .select(`
+        id,
         campaign_id,
         audience_id,
         broadcast_content,
@@ -322,7 +345,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .eq('campaign_id', latestDraftCampaignId)
       .not('broadcast_content', 'is', null)
       .neq('broadcast_content', '')
-      .order('audience_id', { ascending: true })
       .order('updated_at', { ascending: false }); // Order by updated_at DESC to get latest first
 
     if (audienceError) {
@@ -330,14 +352,34 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       console.error('   Error code:', audienceError.code);
       console.error('   Error message:', audienceError.message);
     } else {
-      console.log('✅ Fetched', audienceData?.length || 0, 'audiences with broadcast_content');
+      console.log('✅ Fetched', audienceData?.length || 0, 'rows with broadcast_content');
       if (audienceData && audienceData.length > 0) {
+        console.log('   Raw fetched data (before deduplication):');
+        audienceData.forEach((aud, idx) => {
+          console.log(`   Raw ${idx + 1}:`, {
+            id: aud.id,
+            audience_id: aud.audience_id,
+            content_preview: aud.broadcast_content?.substring(0, 50) || 'EMPTY',
+            content_length: aud.broadcast_content?.length || 0,
+            updated_at: aud.updated_at,
+          });
+        });
+        
         // Group by audience_id and take only the latest one (highest updated_at)
         const latestByAudience = new Map();
         audienceData.forEach((aud) => {
           const existing = latestByAudience.get(aud.audience_id);
-          if (!existing || new Date(aud.updated_at) > new Date(existing.updated_at)) {
+          const audDate = new Date(aud.updated_at);
+          const existingDate = existing ? new Date(existing.updated_at) : null;
+          
+          if (!existing || (existingDate && audDate > existingDate)) {
+            console.log(`   ✅ Selecting row ${aud.id} for audience ${aud.audience_id} (updated_at: ${aud.updated_at})`);
+            if (existing) {
+              console.log(`      Replacing row ${existing.id} (updated_at: ${existing.updated_at})`);
+            }
             latestByAudience.set(aud.audience_id, aud);
+          } else {
+            console.log(`   ⏭️  Skipping row ${aud.id} for audience ${aud.audience_id} (older than existing)`);
           }
         });
         
@@ -345,7 +387,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         console.log(`   After deduplication: ${deduplicatedData.length} unique audiences`);
         
         deduplicatedData.forEach((aud, idx) => {
-          console.log(`   Audience ${idx + 1} (LATEST):`, {
+          console.log(`   Audience ${idx + 1} (FINAL SELECTED):`, {
+            id: aud.id,
             audience_id: aud.audience_id,
             content_preview: aud.broadcast_content?.substring(0, 50) || 'EMPTY',
             content_length: aud.broadcast_content?.length || 0,
