@@ -172,27 +172,32 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     // FINAL VERIFICATION: Double-check that the campaign is still content_drafted
     // This ensures we don't return a campaign that was just rejected/approved
-    console.log('🔍 Final verification: Checking campaign status one more time...');
+    console.log('🔍 [API /api/drafts] Final verification: Checking campaign status one more time...');
     const { data: finalCheck, error: finalCheckError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign')
-      .select('id, status')
+      .select('id, status, updated_at')
       .eq('id', latestDraftCampaignId)
       .single();
     
     if (finalCheckError) {
-      console.warn('⚠️ Cannot verify campaign status:', finalCheckError.message);
+      console.warn('⚠️ [API /api/drafts] Cannot verify campaign status:', finalCheckError.message);
       // Continue anyway - might be permission issue
     } else if (finalCheck) {
+      console.log(`📊 [API /api/drafts] Database State:`);
+      console.log(`   Campaign ID: ${finalCheck.id}`);
+      console.log(`   Status: ${finalCheck.status}`);
+      console.log(`   Updated At: ${finalCheck.updated_at}`);
+      
       if (finalCheck.status !== 'content_drafted') {
-        console.log(`❌ Campaign ${latestDraftCampaignId} status is "${finalCheck.status}", not "content_drafted" - returning null`);
+        console.log(`❌ [API /api/drafts] Campaign ${latestDraftCampaignId} status is "${finalCheck.status}", not "content_drafted" - returning null`);
         return NextResponse.json({
           draft: null,
           campaign_id: null,
-          message: 'No draft campaign found (campaign status is not content_drafted)',
+          message: `No draft campaign found (campaign status is "${finalCheck.status}", not "content_drafted")`,
         });
       } else {
-        console.log('✅ Final verification passed: Campaign status is content_drafted');
+        console.log('✅ [API /api/drafts] Final verification passed: Campaign status is content_drafted');
       }
     }
 

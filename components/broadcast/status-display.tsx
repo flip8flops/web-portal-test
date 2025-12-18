@@ -84,7 +84,7 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange, onD
       const guardrailsQCCompleted = statuses['guardrails_qc']?.status === 'completed';
       
       if (allFinished && contentMakerCompleted && guardrailsQCCompleted && onDrafted) {
-        console.log('✅ All agents finished and draft is ready, notifying parent:', campaignId);
+        console.log('✅ [StatusDisplay] All agents finished and draft is ready, notifying parent:', campaignId);
         // IMPORTANT: Notify parent that campaign is drafted
         // DO NOT clear localStorage here - parent will handle it
         onDrafted(campaignId);
