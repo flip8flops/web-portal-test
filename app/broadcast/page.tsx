@@ -471,23 +471,34 @@ export default function BroadcastPage() {
       const sendData = await sendResponse.json();
       console.log('Send result:', sendData);
 
-      // Wait a bit for status update to propagate
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const result = await sendResponse.json();
+      console.log('✅ Send result:', result);
 
-      // Refresh state
-      const state = await checkCampaignState(draftCampaignId);
-      setCampaignState(state);
+      // IMPORTANT: Update local state immediately (bypassing cache)
+      // Same pattern as reject - don't wait for checkCampaignState
+      console.log('🔄 Updating local state immediately after approve & send (bypassing cache)...');
       
-      if (state === 'approved') {
-        setDraftCampaignId(null);
-        setCampaignId(null);
-        setActiveTab('input');
-        if (typeof window !== 'undefined' && window.localStorage) {
-          localStorage.removeItem('current_campaign_id');
-          localStorage.removeItem('current_execution_id');
-          localStorage.removeItem('current_campaign_timestamp');
-        }
+      const approvedCampaignId = draftCampaignId;
+      
+      // Clear all campaign-related state immediately
+      setDraftCampaignId(null);
+      setCampaignId(null);
+      setExecutionId(null);
+      
+      // Force campaign state to idle to unlock input
+      setCampaignState('idle');
+      
+      // Switch to input tab
+      setActiveTab('input');
+      
+      // Clear localStorage
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.removeItem('current_campaign_id');
+        localStorage.removeItem('current_execution_id');
+        localStorage.removeItem('current_campaign_timestamp');
       }
+      
+      console.log('✅ Local state updated - input unlocked, output cleared');
     } catch (error) {
       console.error('Error approving and sending:', error);
       setError(error instanceof Error ? error.message : 'Failed to approve and send');
@@ -499,6 +510,7 @@ export default function BroadcastPage() {
     if (!draftCampaignId) return;
 
     try {
+      console.log('🚫 handleReject: Starting reject for campaign:', draftCampaignId);
       setError(null);
       
       const response = await fetch('/api/drafts/reject', {
@@ -513,28 +525,40 @@ export default function BroadcastPage() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error('❌ Reject API error:', response.status, errorData);
         throw new Error(errorData.error || 'Failed to reject campaign');
       }
 
-      // Wait a bit for status update to propagate
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const result = await response.json();
+      console.log('✅ Reject API success:', result);
 
-      // Refresh state
-      const state = await checkCampaignState(draftCampaignId);
-      setCampaignState(state);
+      // IMPORTANT: Update local state immediately (bypassing cache)
+      // Don't wait for checkCampaignState which might return cached data
+      console.log('🔄 Updating local state immediately (bypassing cache)...');
       
-      if (state === 'rejected') {
-        setDraftCampaignId(null);
-        setCampaignId(null);
-        setActiveTab('input');
-        if (typeof window !== 'undefined' && window.localStorage) {
-          localStorage.removeItem('current_campaign_id');
-          localStorage.removeItem('current_execution_id');
-          localStorage.removeItem('current_campaign_timestamp');
-        }
+      const rejectedCampaignId = draftCampaignId;
+      
+      // Clear all campaign-related state immediately
+      setDraftCampaignId(null);
+      setCampaignId(null);
+      setExecutionId(null);
+      
+      // Force campaign state to idle to unlock input
+      setCampaignState('idle');
+      
+      // Switch to input tab
+      setActiveTab('input');
+      
+      // Clear localStorage
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.removeItem('current_campaign_id');
+        localStorage.removeItem('current_execution_id');
+        localStorage.removeItem('current_campaign_timestamp');
       }
+      
+      console.log('✅ Local state updated - input unlocked, output cleared');
     } catch (error) {
-      console.error('Error rejecting:', error);
+      console.error('❌ Error rejecting:', error);
       setError(error instanceof Error ? error.message : 'Failed to reject campaign');
       throw error; // Re-throw so component can handle it
     }
@@ -798,21 +822,6 @@ export default function BroadcastPage() {
               <Alert className="border-green-500 bg-green-50 dark:bg-green-950">
                 <AlertDescription className="text-green-700 dark:text-green-300">
                   Campaign has been approved and sent successfully. You can now create a new campaign in the Input tab.
-                </AlertDescription>
-              </Alert>
-              {campaignId && (
-                <StatusDisplay 
-                  campaignId={campaignId} 
-                  executionId={executionId}
-                  onProcessingChange={setIsProcessing}
-                />
-              )}
-            </div>
-          ) : campaignState === 'rejected' ? (
-            <div className="space-y-4">
-              <Alert className="border-orange-500 bg-orange-50 dark:bg-orange-950">
-                <AlertDescription className="text-orange-700 dark:text-orange-300">
-                  Campaign has been rejected. You can now create a new campaign in the Input tab.
                 </AlertDescription>
               </Alert>
               {campaignId && (
