@@ -123,12 +123,16 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
         if (foundAudience) {
           // Update selected audience with latest data from server
           console.log('🔄 Updating selected audience detail with fresh data from server');
+          console.log('   Audience ID:', foundAudience.audience_id);
+          console.log('   Content preview:', foundAudience.broadcast_content?.substring(0, 50) || 'EMPTY');
           setSelectedAudienceDetail(foundAudience);
         } else if (!selectedAudienceDetail) {
           // No selection yet, select first one
           setSelectedAudienceDetail(data.draft.audiences[0]);
         }
       }
+      
+      setLoading(false);
     } catch (error) {
       console.error('Error fetching draft:', error);
     } finally {
@@ -226,19 +230,32 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
       setEditedContent('');
       
       // Refresh draft data from server to get latest data
+      // fetchDraft will update the draft state, then we'll update selectedAudienceDetail
       await fetchDraft();
       
-      // After fetchDraft completes, update selected audience detail with fresh data
-      // Use a small delay to ensure state has updated
-      setTimeout(() => {
-        if (draft) {
-          const updatedAudience = draft.audiences.find(aud => aud.audience_id === audienceId);
-          if (updatedAudience) {
-            console.log('🔄 Updating selected audience detail with fresh data');
-            setSelectedAudienceDetail(updatedAudience);
+      // Wait a bit for state to update, then update selected audience detail
+      // We need to re-fetch the draft to get the latest data
+      setTimeout(async () => {
+        // Re-fetch to ensure we have the absolute latest data
+        const refreshResponse = await fetch(`/api/drafts?campaign_id=${draft.campaign_id}`);
+        if (refreshResponse.ok) {
+          const refreshData = await refreshResponse.json();
+          if (refreshData.draft) {
+            // Update draft state with fresh data
+            setDraft(refreshData.draft);
+            
+            // Find and update selected audience detail
+            const updatedAudience = refreshData.draft.audiences.find((aud: DraftAudience) => aud.audience_id === audienceId);
+            if (updatedAudience) {
+              console.log('🔄 Updating selected audience detail with fresh data from server');
+              console.log('   Updated content preview:', updatedAudience.broadcast_content?.substring(0, 50) || 'EMPTY');
+              setSelectedAudienceDetail(updatedAudience);
+            } else {
+              console.warn('⚠️ Updated audience not found in fresh data');
+            }
           }
         }
-      }, 300);
+      }, 500);
     } catch (error) {
       console.error('Error saving edit:', error);
       alert('Failed to save changes. Please try again.');

@@ -154,6 +154,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     let totalMatchedAudience = 0;
 
     // Try to get campaign info from campaign table FIRST
+    console.log('🔍 Attempting to fetch campaign from table with ID:', latestDraftCampaignId);
     const { data: campaignTableData, error: campaignError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign')
@@ -165,13 +166,38 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       console.error('❌ Error fetching campaign table:', campaignError);
       console.error('   Code:', campaignError.code);
       console.error('   Message:', campaignError.message);
+      console.error('   Details:', campaignError.details);
+      console.error('   Hint:', campaignError.hint);
       console.log('⚠️ Cannot access campaign table, will try fallback');
     } else if (campaignTableData) {
       console.log('✅ Campaign table data fetched successfully');
+      console.log('   Campaign ID:', campaignTableData.id);
       console.log('   Raw name:', campaignTableData.name || 'NULL');
       console.log('   Raw objective:', campaignTableData.objective ? campaignTableData.objective.substring(0, 50) + '...' : 'NULL');
       console.log('   Has meta:', !!campaignTableData.meta);
+      console.log('   Meta type:', typeof campaignTableData.meta);
+      if (campaignTableData.meta) {
+        console.log('   Meta keys:', Object.keys(campaignTableData.meta));
+        console.log('   Meta research_payload exists:', !!campaignTableData.meta.research_payload);
+        if (campaignTableData.meta.research_payload) {
+          console.log('   Meta research_payload keys:', Object.keys(campaignTableData.meta.research_payload));
+          console.log('   Meta campaign_brief exists:', !!campaignTableData.meta.research_payload.campaign_brief);
+          if (campaignTableData.meta.research_payload.campaign_brief) {
+            console.log('   Meta campaign_brief keys:', Object.keys(campaignTableData.meta.research_payload.campaign_brief));
+            console.log('   Meta campaign_brief.title:', campaignTableData.meta.research_payload.campaign_brief.title || 'NOT FOUND');
+            console.log('   Meta campaign_brief.objective:', campaignTableData.meta.research_payload.campaign_brief.objective ? campaignTableData.meta.research_payload.campaign_brief.objective.substring(0, 50) + '...' : 'NOT FOUND');
+          }
+        }
+        console.log('   Meta origin_raw_admin_notes:', campaignTableData.meta.origin_raw_admin_notes ? campaignTableData.meta.origin_raw_admin_notes.substring(0, 50) + '...' : 'NOT FOUND');
+      }
       console.log('   Has matchmaker_strategy:', !!campaignTableData.matchmaker_strategy);
+      if (campaignTableData.matchmaker_strategy) {
+        console.log('   Matchmaker_strategy type:', typeof campaignTableData.matchmaker_strategy);
+        console.log('   Matchmaker_strategy keys:', Object.keys(campaignTableData.matchmaker_strategy));
+        console.log('   Matchmaker_strategy.tags:', campaignTableData.matchmaker_strategy.tags);
+        console.log('   Matchmaker_strategy.tags type:', typeof campaignTableData.matchmaker_strategy.tags);
+        console.log('   Matchmaker_strategy.tags is array:', Array.isArray(campaignTableData.matchmaker_strategy.tags));
+      }
       
       // Extract from meta FIRST (most reliable source)
       const meta = campaignTableData.meta || {};
@@ -383,6 +409,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
 
     console.log('✅ Returning draft data with', audiences.length, 'audiences');
+    console.log('📤 Final response data:', {
+      campaign_id: latestDraftCampaignId,
+      campaign_name: campaignName,
+      campaign_objective: campaignObjective ? campaignObjective.substring(0, 30) + '...' : 'MISSING',
+      campaign_objective_length: campaignObjective ? campaignObjective.length : 0,
+      origin_notes: originNotes ? originNotes.substring(0, 30) + '...' : 'MISSING',
+      origin_notes_length: originNotes ? originNotes.length : 0,
+      tags_count: campaignTags.length,
+      tags: campaignTags,
+      total_matched_audience: totalMatchedAudience,
+      audiences_count: audiences.length,
+    });
     
     return NextResponse.json({
       draft: {
