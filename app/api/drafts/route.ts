@@ -271,6 +271,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     // Get campaign audiences with broadcast_content
     console.log('🔍 Fetching campaign audiences with broadcast_content...');
+    console.log('   Campaign ID:', latestDraftCampaignId);
+    
     const { data: audienceData, error: audienceError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign_audience')
@@ -285,7 +287,26 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       `)
       .eq('campaign_id', latestDraftCampaignId)
       .not('broadcast_content', 'is', null)
-      .neq('broadcast_content', '');
+      .neq('broadcast_content', '')
+      .order('updated_at', { ascending: false }); // Order by updated_at to get latest first
+
+    if (audienceError) {
+      console.error('❌ Error fetching campaign audiences:', audienceError);
+      console.error('   Error code:', audienceError.code);
+      console.error('   Error message:', audienceError.message);
+    } else {
+      console.log('✅ Fetched', audienceData?.length || 0, 'audiences with broadcast_content');
+      if (audienceData && audienceData.length > 0) {
+        audienceData.forEach((aud, idx) => {
+          console.log(`   Audience ${idx + 1}:`, {
+            audience_id: aud.audience_id,
+            content_preview: aud.broadcast_content?.substring(0, 50) || 'EMPTY',
+            content_length: aud.broadcast_content?.length || 0,
+            updated_at: aud.updated_at,
+          });
+        });
+      }
+    }
 
     if (audienceError) {
       console.error('❌ Error fetching audiences:', audienceError);
@@ -385,7 +406,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         guardrailsTag = 'passed';
       }
 
-      return {
+      const audienceResult = {
         campaign_id: item.campaign_id,
         audience_id: item.audience_id,
         audience_name: audienceDetail.full_name || audienceDetail.source_contact_id || 'Unknown',
@@ -403,6 +424,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         created_at: item.created_at,
         updated_at: item.updated_at,
       };
+      
+      // Log broadcast_content for debugging
+      console.log(`   📝 Audience ${audienceResult.audience_name} (${audienceResult.audience_id}):`);
+      console.log(`      Content preview: ${audienceResult.broadcast_content?.substring(0, 80) || 'EMPTY'}`);
+      console.log(`      Content length: ${audienceResult.broadcast_content?.length || 0}`);
+      console.log(`      Updated at: ${audienceResult.updated_at}`);
+      
+      return audienceResult;
     });
 
     console.log('✅ Returning draft data with', audiences.length, 'audiences');
