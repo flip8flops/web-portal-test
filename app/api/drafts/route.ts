@@ -39,124 +39,87 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     console.log('🔍 Request campaign_id param:', campaignId || 'none');
 
     // Find latest campaign with status "content_drafted"
+    // CRITICAL: Query campaign table FIRST (source of truth) before checking status updates
+    // This avoids race conditions where campaign.status is updated but status_updates haven't synced yet
     let latestDraftCampaignId = campaignId;
 
     if (!latestDraftCampaignId) {
-      console.log('🔍 Querying for draft campaign...');
+      console.log('🔍 [API /api/drafts] Querying for draft campaign...');
       
-      // Approach: Query campaign_status_updates by agent_name and status (same as StatusDisplay)
-      // Look for content_maker_agent with status='completed' which indicates draft is ready
-      // This matches how StatusDisplay successfully queries this table
-      console.log('🔍 Step 1: Querying campaign_status_updates for content_maker_agent completed...');
-      const { data: statusData, error: statusError } = await supabase
+      // STEP 1: PRIORITY - Query campaign table directly (source of truth)
+      // This is the most reliable way to find content_drafted campaigns
+      console.log('🔍 [API /api/drafts] STEP 1: Querying campaign table for status="content_drafted"...');
+      const { data: campaignData, error: campaignError } = await supabase
         .schema('citia_mora_datamart')
-        .from('campaign_status_updates')
-        .select('campaign_id, agent_name, status, message, updated_at, metadata')
-        .eq('agent_name', 'content_maker_agent')
-        .eq('status', 'completed')
+        .from('campaign')
+        .select('id, status, updated_at')
+        .eq('status', 'content_drafted')
         .order('updated_at', { ascending: false })
-        .limit(10); // Get multiple to find the latest one
+        .limit(1)
+        .maybeSingle();
 
-      if (statusError) {
-        console.error('❌ Error querying campaign_status_updates:', statusError);
-        console.error('❌ Error code:', statusError.code);
-        console.error('❌ Error message:', statusError.message);
-      } else if (statusData && statusData.length > 0) {
-        // Find the latest one that has a valid campaign_id AND check if campaign status is still content_drafted
-        for (const status of statusData) {
-          if (!status.campaign_id) continue;
-          
-          // CRITICAL: Check campaign.status to ensure it's still content_drafted (not rejected/approved)
-          console.log('🔍 Checking campaign status for:', status.campaign_id);
-          const { data: campaignCheck, error: checkError } = await supabase
-            .schema('citia_mora_datamart')
-            .from('campaign')
-            .select('id, status')
-            .eq('id', status.campaign_id)
-            .single();
-          
-          if (checkError) {
-            console.warn('⚠️ Cannot check campaign status:', checkError.message);
-            continue; // Skip this one if we can't check
-          }
-          
-          if (campaignCheck && campaignCheck.status === 'content_drafted') {
-            latestDraftCampaignId = status.campaign_id;
-            console.log('✅ Found draft campaign from campaign_status_updates:', latestDraftCampaignId);
-            console.log('   Campaign status confirmed: content_drafted');
-            break; // Found valid draft, stop searching
-          } else {
-            console.log(`   Campaign ${status.campaign_id} status is: ${campaignCheck?.status || 'unknown'} - skipping (not content_drafted)`);
-          }
-        }
-        
-        if (!latestDraftCampaignId) {
-          console.log('ℹ️ Found status updates but no campaign with status="content_drafted"');
-        }
+      if (campaignError) {
+        console.error('❌ [API /api/drafts] Error querying campaign table:', campaignError);
+        console.error('   Error code:', campaignError.code);
+        console.error('   Error message:', campaignError.message);
+        console.log('⚠️ [API /api/drafts] Permission error on campaign table - falling back to status updates');
+      } else if (campaignData && campaignData.id && campaignData.status === 'content_drafted') {
+        latestDraftCampaignId = campaignData.id;
+        console.log('✅ [API /api/drafts] Found draft campaign from campaign.status (STEP 1):', latestDraftCampaignId);
+        console.log('   Campaign status confirmed: content_drafted');
+        console.log('   Updated at:', campaignData.updated_at);
       } else {
-        console.log('ℹ️ No content_maker_agent completed status found, trying alternative approach...');
-        
-        // Alternative: Query all recent status updates and find one with workflow_point indicating draft
-        const { data: altStatusData, error: altStatusError } = await supabase
+        console.log('ℹ️ [API /api/drafts] No campaign found with status="content_drafted" in STEP 1');
+        if (campaignData) {
+          console.log(`   Found campaign but status is: ${campaignData.status} (not content_drafted)`);
+        }
+      }
+      
+      // STEP 2: Fallback - Query campaign_status_updates if direct query failed or returned nothing
+      // This handles cases where permission is an issue or there's a timing issue
+      if (!latestDraftCampaignId) {
+        console.log('🔍 [API /api/drafts] STEP 2: Fallback - Querying campaign_status_updates for content_maker_agent completed...');
+        const { data: statusData, error: statusError } = await supabase
           .schema('citia_mora_datamart')
           .from('campaign_status_updates')
           .select('campaign_id, agent_name, status, message, updated_at, metadata')
+          .eq('agent_name', 'content_maker_agent')
+          .eq('status', 'completed')
           .order('updated_at', { ascending: false })
-          .limit(50);
-        
-        if (!altStatusError && altStatusData && altStatusData.length > 0) {
-          // Look for status update with metadata.workflow_point = 'content_maker_completed'
-          const draftStatus = altStatusData.find((s: any) => {
-            const metadata = s.metadata || {};
-            return metadata.workflow_point === 'content_maker_completed' && s.campaign_id;
-          });
-          
-          if (draftStatus && draftStatus.campaign_id) {
-            // CRITICAL: Verify campaign status is still content_drafted
+          .limit(10);
+
+        if (statusError) {
+          console.error('❌ [API /api/drafts] Error querying campaign_status_updates:', statusError);
+        } else if (statusData && statusData.length > 0) {
+          // Find the latest one that has a valid campaign_id AND check if campaign status is still content_drafted
+          for (const status of statusData) {
+            if (!status.campaign_id) continue;
+            
+            // CRITICAL: Check campaign.status to ensure it's still content_drafted (not rejected/approved)
+            console.log('🔍 [API /api/drafts] Checking campaign status for:', status.campaign_id);
             const { data: campaignCheck, error: checkError } = await supabase
               .schema('citia_mora_datamart')
               .from('campaign')
               .select('id, status')
-              .eq('id', draftStatus.campaign_id)
+              .eq('id', status.campaign_id)
               .single();
             
-            if (!checkError && campaignCheck && campaignCheck.status === 'content_drafted') {
-              latestDraftCampaignId = draftStatus.campaign_id;
-              console.log('✅ Found draft campaign from workflow_point metadata:', latestDraftCampaignId);
+            if (checkError) {
+              console.warn('⚠️ [API /api/drafts] Cannot check campaign status:', checkError.message);
+              continue;
+            }
+            
+            if (campaignCheck && campaignCheck.status === 'content_drafted') {
+              latestDraftCampaignId = status.campaign_id;
+              console.log('✅ [API /api/drafts] Found draft campaign from campaign_status_updates (STEP 2):', latestDraftCampaignId);
               console.log('   Campaign status confirmed: content_drafted');
+              break;
             } else {
-              console.log(`   Campaign ${draftStatus.campaign_id} status is: ${campaignCheck?.status || 'unknown'} - skipping (not content_drafted)`);
+              console.log(`   Campaign ${status.campaign_id} status is: ${campaignCheck?.status || 'unknown'} - skipping (not content_drafted)`);
             }
           }
-        }
-        
-        // Final fallback: Try direct query to campaign table (may fail with permission error)
-        if (!latestDraftCampaignId) {
-          console.log('ℹ️ Trying to find by campaign.status...');
-          const { data: campaignData, error: campaignError } = await supabase
-            .schema('citia_mora_datamart')
-            .from('campaign')
-            .select('id, status, updated_at')
-            .eq('status', 'content_drafted')
-            .order('updated_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          if (campaignError) {
-            console.error('❌ Error querying campaign table:', campaignError);
-            console.error('❌ Error code:', campaignError.code);
-            console.error('❌ Error message:', campaignError.message);
-            console.log('⚠️ Permission error on campaign table - check Supabase grants');
-          } else if (campaignData && campaignData.id && campaignData.status === 'content_drafted') {
-            latestDraftCampaignId = campaignData.id;
-            console.log('✅ Found draft campaign from campaign.status:', latestDraftCampaignId);
-            console.log('   Campaign status confirmed: content_drafted');
-          } else {
-            console.log('ℹ️ No campaign found with status="content_drafted"');
-            if (campaignData) {
-              console.log(`   Found campaign but status is: ${campaignData.status} (not content_drafted)`);
-            }
-          }
+        } else {
+          console.log('ℹ️ [API /api/drafts] No content_maker_agent completed status found in STEP 2');
         }
       }
     }

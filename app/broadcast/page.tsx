@@ -446,18 +446,25 @@ export default function BroadcastPage() {
   }, []);
 
   // Monitor campaign state changes and check for drafts
+  // CRITICAL: This effect runs independently to find and set draft campaigns
   useEffect(() => {
     if (!session) return;
 
     const checkForDrafts = async () => {
+      console.log(`\n📊 [PERIODIC CHECK] ==========================================`);
+      console.log(`📊 [PERIODIC CHECK] Checking for draft campaigns...`);
+      
       // Always check for latest draft campaign on mount and periodically
       const latestDraftId = await findLatestDraftCampaign();
+      console.log(`📊 [PERIODIC CHECK] Latest draft ID from API: ${latestDraftId || 'null'}`);
+      
       if (latestDraftId) {
         const draftState = await checkCampaignState(latestDraftId);
-        console.log('🔍 Periodic check - Found campaign:', latestDraftId, 'State:', draftState);
+        console.log(`📊 [PERIODIC CHECK] Campaign ${latestDraftId} state: ${draftState}`);
         
         // Only set as draft if state is actually 'drafted'
         if (draftState === 'drafted') {
+          console.log(`✅ [PERIODIC CHECK] Setting draft campaign state`);
           setDraftCampaignId(latestDraftId);
           setCampaignState('drafted');
           setCampaignId(latestDraftId);
@@ -469,7 +476,7 @@ export default function BroadcastPage() {
           }
         } else {
           // Campaign is not drafted (rejected/approved) - clear everything
-          console.log('⚠️ Campaign is', draftState, '- not a draft, clearing state');
+          console.log(`⚠️ [PERIODIC CHECK] Campaign is ${draftState} - not a draft, clearing state`);
           setDraftCampaignId(null);
           setCampaignId(null);
           setCampaignState('idle');
@@ -487,31 +494,41 @@ export default function BroadcastPage() {
         }
       } else {
         // No draft found - clear state if we had one
-        console.log('ℹ️ No draft campaign found - clearing state');
-        setDraftCampaignId(null);
-        setCampaignId(null);
-        setCampaignState('idle');
+        console.log(`ℹ️ [PERIODIC CHECK] No draft campaign found - clearing state`);
         
-        // IMPORTANT: Also clear localStorage if no draft found
-        // This prevents showing rejected/approved campaigns after refresh
-        if (typeof window !== 'undefined' && window.localStorage) {
+        // Only clear if we don't have a processing campaign
+        if (campaignState !== 'processing') {
+          setDraftCampaignId(null);
+          // Don't clear campaignId if it's a processing campaign
+          if (campaignState !== 'processing') {
+            setCampaignId(null);
+          }
+          setCampaignState('idle');
+        }
+        
+        // IMPORTANT: Also clear localStorage if no draft found (but keep if processing)
+        if (typeof window !== 'undefined' && window.localStorage && campaignState !== 'processing') {
           const savedId = localStorage.getItem('current_campaign_id');
           if (savedId) {
-            console.log('🧹 Periodic check: Clearing saved campaign_id (no draft found):', savedId);
+            console.log(`🧹 [PERIODIC CHECK] Clearing saved campaign_id (no draft found): ${savedId}`);
             localStorage.removeItem('current_campaign_id');
             localStorage.removeItem('current_execution_id');
             localStorage.removeItem('current_campaign_timestamp');
           }
         }
       }
+      console.log(`📊 [PERIODIC CHECK] ==========================================\n`);
     };
 
     // Initial check after a short delay
     const timeout = setTimeout(checkForDrafts, 1000);
     const interval = setInterval(checkForDrafts, 5000); // Check every 5 seconds
 
-    return () => clearInterval(interval);
-  }, []); // Run on mount and periodically, not dependent on campaignId
+    return () => {
+      clearTimeout(timeout);
+      clearInterval(interval);
+    };
+  }, [session, activeTab, campaignState]); // Include campaignState to avoid clearing processing campaigns
 
   // Monitor specific campaign state changes
   useEffect(() => {
