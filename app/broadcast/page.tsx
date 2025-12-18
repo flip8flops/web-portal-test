@@ -52,8 +52,25 @@ export default function BroadcastPage() {
         const data = await response.json();
         if (data.draft) {
           // If API returns draft, it means campaign is in drafted state
+          console.log('✅ API returned draft for campaign:', cid);
           return 'drafted';
         }
+      }
+
+      // Also check campaign.status directly from campaign table via API
+      // This is more reliable than checking status messages
+      try {
+        const campaignResponse = await fetch(`/api/drafts?campaign_id=${cid}`);
+        if (campaignResponse.ok) {
+          const campaignData = await campaignResponse.json();
+          // If campaign_id is returned, check if it's actually a draft
+          if (campaignData.campaign_id === cid) {
+            // API already verified status is content_drafted if it returns campaign_id
+            // But if draft is null, check status messages as fallback
+          }
+        }
+      } catch (e) {
+        console.warn('Could not check campaign status via API:', e);
       }
 
       // Fallback: Check for latest status messages from campaign_status_updates
@@ -76,6 +93,40 @@ export default function BroadcastPage() {
       );
       if (hasProcessing) {
         return 'processing';
+      }
+
+      // Check for content_maker_agent completed - this indicates draft is ready
+      const hasContentMakerCompleted = statusData.some(
+        (s) => s.agent_name === 'content_maker_agent' && s.status === 'completed'
+      );
+      
+      // Check for guardrails completed (guardrails out) - this also indicates draft is ready
+      const hasGuardrailsCompleted = statusData.some(
+        (s) => s.agent_name === 'guardrails' && s.status === 'completed' && 
+        s.message?.includes('cpgTagged')
+      );
+
+      // If content_maker_agent completed AND guardrails completed, campaign is drafted
+      if (hasContentMakerCompleted && hasGuardrailsCompleted) {
+        console.log('✅ Detected drafted state: content_maker_agent + guardrails completed');
+        return 'drafted';
+      }
+
+      // Check for content_maker_agent completed - this indicates draft is ready
+      const hasContentMakerCompleted = statusData.some(
+        (s) => s.agent_name === 'content_maker_agent' && s.status === 'completed'
+      );
+      
+      // Check for guardrails completed (guardrails out) - this also indicates draft is ready
+      const hasGuardrailsCompleted = statusData.some(
+        (s) => s.agent_name === 'guardrails' && s.status === 'completed' && 
+        s.message?.includes('cpgTagged')
+      );
+
+      // If content_maker_agent completed AND guardrails completed, campaign is drafted
+      if (hasContentMakerCompleted && hasGuardrailsCompleted) {
+        console.log('✅ Detected drafted state: content_maker_agent + guardrails completed');
+        return 'drafted';
       }
 
       // Check for latest status messages (check most recent first)
@@ -383,7 +434,14 @@ export default function BroadcastPage() {
       setCampaignState(state);
       
       if (state === 'drafted') {
+        // IMPORTANT: Set draftCampaignId when state becomes drafted
+        console.log('✅ Campaign is drafted, setting draftCampaignId:', campaignId);
         setDraftCampaignId(campaignId);
+        // Save to localStorage for persistence
+        if (typeof window !== 'undefined' && window.localStorage) {
+          localStorage.setItem('current_campaign_id', campaignId);
+          localStorage.setItem('current_campaign_timestamp', Date.now().toString());
+        }
         // Don't auto-switch tabs
       } else if (state === 'approved' || state === 'rejected') {
         setDraftCampaignId(null);
@@ -404,7 +462,7 @@ export default function BroadcastPage() {
     const interval = setInterval(checkState, 5000); // Check every 5 seconds
 
     return () => clearInterval(interval);
-  }, [campaignId]);
+  }, [campaignId, draftCampaignId, activeTab]);
 
   const handleApproveAndSend = async (selectedAudienceIds: string[]) => {
     if (!draftCampaignId) return;
