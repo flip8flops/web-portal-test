@@ -22,6 +22,7 @@ interface StatusDisplayProps {
   campaignId: string | null;
   executionId?: string | null;
   onProcessingChange?: (isProcessing: boolean) => void;
+  onDrafted?: (campaignId: string) => void;
 }
 
 const agentLabels: Record<string, string> = {
@@ -48,7 +49,7 @@ const statusColors: Record<string, string> = {
   rejected: 'text-orange-600',
 };
 
-export function StatusDisplay({ campaignId, executionId, onProcessingChange }: StatusDisplayProps) {
+export function StatusDisplay({ campaignId, executionId, onProcessingChange, onDrafted }: StatusDisplayProps) {
   const [statuses, setStatuses] = useState<Record<string, StatusUpdate>>({});
   const [loading, setLoading] = useState(false);
   // Use ref to track current IDs and prevent race conditions
@@ -57,7 +58,7 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
     executionId: null,
   });
 
-  // Notify parent when processing status changes
+  // Notify parent when processing status changes and when campaign becomes drafted
   useEffect(() => {
     if (!onProcessingChange) return;
     
@@ -67,27 +68,29 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
     
     onProcessingChange(isProcessing);
     
-    // Clear localStorage when processing is complete (all agents completed/rejected/error)
-    if (!isProcessing && Object.keys(statuses).length > 0) {
+    // Check if campaign is drafted (all agents completed, including guardrails_qc)
+    if (!isProcessing && Object.keys(statuses).length > 0 && campaignId && campaignId !== 'pending') {
       const allAgents = ['guardrails', 'research_agent', 'matchmaker_agent', 'content_maker_agent', 'guardrails_qc'];
       const allFinished = allAgents.every((agent) => {
         const status = statuses[agent];
-        return !status || // Agent belum mulai (tidak perlu clear)
+        return !status || // Agent belum mulai (tidak perlu check)
                status.status === 'completed' || 
                status.status === 'rejected' || 
                status.status === 'error';
       });
       
-      if (allFinished) {
-        console.log('✅ All agents finished, clearing localStorage');
-        if (typeof window !== 'undefined' && window.localStorage) {
-          localStorage.removeItem('current_campaign_id');
-          localStorage.removeItem('current_execution_id');
-          localStorage.removeItem('current_campaign_timestamp');
-        }
+      // Check if content_maker_agent and guardrails_qc are both completed (indicates draft is ready)
+      const contentMakerCompleted = statuses['content_maker_agent']?.status === 'completed';
+      const guardrailsQCCompleted = statuses['guardrails_qc']?.status === 'completed';
+      
+      if (allFinished && contentMakerCompleted && guardrailsQCCompleted && onDrafted) {
+        console.log('✅ All agents finished and draft is ready, notifying parent:', campaignId);
+        // IMPORTANT: Notify parent that campaign is drafted
+        // DO NOT clear localStorage here - parent will handle it
+        onDrafted(campaignId);
       }
     }
-  }, [statuses, onProcessingChange]);
+  }, [statuses, onProcessingChange, onDrafted, campaignId]);
 
   useEffect(() => {
     console.log('StatusDisplay: useEffect triggered', { campaignId, executionId });

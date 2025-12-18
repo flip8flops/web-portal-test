@@ -101,14 +101,34 @@ export default function BroadcastPage() {
       );
       
       // Check for guardrails completed (guardrails out) - this also indicates draft is ready
-      const hasGuardrailsCompleted = statusData.some(
-        (s) => s.agent_name === 'guardrails' && s.status === 'completed' && 
-        s.message?.includes('cpgTagged')
+      // Guardrails QC can be identified by:
+      // 1. workflow_point includes 'guardrails_checking' or 'guardrails_completed'
+      // 2. OR message includes 'cpgTagged'
+      // 3. OR it comes after content_maker_agent (check timestamp)
+      const contentMakerStatus = statusData.find(
+        (s) => s.agent_name === 'content_maker_agent' && s.status === 'completed'
       );
+      const contentMakerTime = contentMakerStatus ? new Date(contentMakerStatus.updated_at) : null;
+      
+      const hasGuardrailsCompleted = statusData.some((s) => {
+        if (s.agent_name !== 'guardrails' || s.status !== 'completed') return false;
+        
+        const metadata = s.metadata || {};
+        const workflowPoint = metadata.workflow_point || '';
+        
+        // Check if this is QC phase guardrails (not initial)
+        const isQC = workflowPoint.includes('guardrails_checking') || 
+                     workflowPoint.includes('guardrails_completed') ||
+                     workflowPoint.includes('guardrails_error') ||
+                     s.message?.includes('cpgTagged') ||
+                     (contentMakerTime && new Date(s.updated_at) > contentMakerTime);
+        
+        return isQC;
+      });
 
-      // If content_maker_agent completed AND guardrails completed, campaign is drafted
+      // If content_maker_agent completed AND guardrails QC completed, campaign is drafted
       if (hasContentMakerCompleted && hasGuardrailsCompleted) {
-        console.log('✅ Detected drafted state: content_maker_agent + guardrails completed');
+        console.log('✅ Detected drafted state: content_maker_agent + guardrails QC completed');
         return 'drafted';
       }
 
@@ -795,6 +815,17 @@ export default function BroadcastPage() {
               campaignId={campaignId || draftCampaignId} 
               executionId={executionId}
               onProcessingChange={setIsProcessing}
+              onDrafted={(cid) => {
+                console.log('✅ StatusDisplay: Campaign is drafted, updating state:', cid);
+                setDraftCampaignId(cid);
+                setCampaignState('drafted');
+                setCampaignId(cid);
+                // Save to localStorage for persistence
+                if (typeof window !== 'undefined' && window.localStorage) {
+                  localStorage.setItem('current_campaign_id', cid);
+                  localStorage.setItem('current_campaign_timestamp', Date.now().toString());
+                }
+              }}
             />
           )}
 
