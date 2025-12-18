@@ -496,18 +496,16 @@ export default function BroadcastPage() {
         // No draft found - clear state if we had one
         console.log(`ℹ️ [PERIODIC CHECK] No draft campaign found - clearing state`);
         
-        // Only clear if we don't have a processing campaign
-        if (campaignState !== 'processing') {
-          setDraftCampaignId(null);
-          // Don't clear campaignId if it's a processing campaign
-          if (campaignState !== 'processing') {
-            setCampaignId(null);
-          }
+        // Only clear draft-related state, preserve processing state
+        setDraftCampaignId(null);
+        // Only clear campaignId and state if not processing
+        if (campaignState !== 'processing' && !isProcessing) {
+          setCampaignId(null);
           setCampaignState('idle');
         }
         
         // IMPORTANT: Also clear localStorage if no draft found (but keep if processing)
-        if (typeof window !== 'undefined' && window.localStorage && campaignState !== 'processing') {
+        if (typeof window !== 'undefined' && window.localStorage && campaignState !== 'processing' && !isProcessing) {
           const savedId = localStorage.getItem('current_campaign_id');
           if (savedId) {
             console.log(`🧹 [PERIODIC CHECK] Clearing saved campaign_id (no draft found): ${savedId}`);
@@ -528,7 +526,7 @@ export default function BroadcastPage() {
       clearTimeout(timeout);
       clearInterval(interval);
     };
-  }, [session, activeTab, campaignState]); // Include campaignState to avoid clearing processing campaigns
+  }, [session, activeTab, campaignState, isProcessing]); // Include campaignState and isProcessing to avoid clearing processing campaigns
 
   // Monitor specific campaign state changes
   useEffect(() => {
