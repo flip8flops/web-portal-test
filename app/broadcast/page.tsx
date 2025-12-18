@@ -785,6 +785,14 @@ export default function BroadcastPage() {
               onApproveAndSend={handleApproveAndSend}
               onReject={handleReject}
             />
+          ) : campaignState === 'rejected' ? (
+            <div className="space-y-4">
+              <Alert className="border-orange-500 bg-orange-50 dark:bg-orange-950">
+                <AlertDescription className="text-orange-700 dark:text-orange-300">
+                  Campaign has been rejected. You can now create a new campaign in the Input tab.
+                </AlertDescription>
+              </Alert>
+            </div>
           ) : campaignState === 'approved' ? (
             <div className="space-y-4">
               <Alert className="border-green-500 bg-green-50 dark:bg-green-950">
