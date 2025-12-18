@@ -328,45 +328,36 @@ export default function BroadcastPage() {
       const latestDraftId = await findLatestDraftCampaign();
       if (latestDraftId) {
         const draftState = await checkCampaignState(latestDraftId);
-        console.log('🔍 Periodic check - Found draft:', latestDraftId, 'State:', draftState);
+        console.log('🔍 Periodic check - Found campaign:', latestDraftId, 'State:', draftState);
         
-        setDraftCampaignId(latestDraftId);
-        setCampaignState(draftState);
-        // IMPORTANT: Always set campaignId so StatusDisplay can show status
-        setCampaignId(latestDraftId);
-        
-        // Don't auto-switch tabs - let user stay on their current tab
-        // Only switch if no tab is active or if explicitly needed
+        // Only set as draft if state is actually 'drafted'
         if (draftState === 'drafted') {
-          // Don't force switch - user might want to stay on input tab
-          // Only switch if we're in an invalid state
-        } else if (draftState === 'approved' || draftState === 'rejected') {
+          setDraftCampaignId(latestDraftId);
+          setCampaignState('drafted');
+          setCampaignId(latestDraftId);
+        } else {
+          // Campaign is not drafted - clear everything
+          console.log('⚠️ Campaign is', draftState, '- not a draft, clearing state');
           setDraftCampaignId(null);
           setCampaignId(null);
+          setCampaignState('idle');
+          
           if (activeTab === 'output') {
             setActiveTab('input');
           }
+          
           if (typeof window !== 'undefined' && window.localStorage) {
             localStorage.removeItem('current_campaign_id');
             localStorage.removeItem('current_execution_id');
             localStorage.removeItem('current_campaign_timestamp');
           }
-        } else if (draftState === 'processing') {
-          if (activeTab !== 'input') {
-            setActiveTab('input');
-          }
-        } else {
-          // Unknown state - assume drafted
-          console.log('⚠️ Unknown draft state in periodic check (' + draftState + '), assuming drafted');
-          setCampaignState('drafted');
-          // Don't auto-switch tabs - let user stay where they are
         }
       } else {
         // No draft found - clear state if we had one
-        if (draftCampaignId && campaignState === 'drafted') {
-          console.log('ℹ️ No draft found, clearing draft state');
-          setDraftCampaignId(null);
-          setCampaignState('idle');
+        console.log('ℹ️ No draft campaign found - clearing state');
+        setDraftCampaignId(null);
+        setCampaignId(null);
+        setCampaignState('idle');
           setCampaignId(null);
         }
       }
