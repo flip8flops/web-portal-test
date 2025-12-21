@@ -613,11 +613,10 @@ export function DraftOutput() {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-500">Send To</p>
-                    <p className="text-base">{selectedAudienceDetail.send_to || selectedAudienceDetail.source_contact_id || 'Unknown'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-500">Channel</p>
-                    <Badge>{selectedAudienceDetail.channel}</Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge className="text-xs">{selectedAudienceDetail.channel}</Badge>
+                      <span className="text-base">{selectedAudienceDetail.send_to || selectedAudienceDetail.source_contact_id || 'Unknown'}</span>
+                    </div>
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-500">Scheduled Send Time</p>
@@ -651,11 +650,18 @@ export function DraftOutput() {
                           size="sm" 
                           onClick={() => {
                             setEditingSchedule(selectedAudienceDetail.audience_id);
-                            setEditedSchedule(
-                              selectedAudienceDetail.scheduled_at 
-                                ? new Date(selectedAudienceDetail.scheduled_at).toISOString().slice(0, 16)
-                                : ''
-                            );
+                            // Convert to local datetime-local format (YYYY-MM-DDTHH:MM)
+                            if (selectedAudienceDetail.scheduled_at) {
+                              const date = new Date(selectedAudienceDetail.scheduled_at);
+                              const year = date.getFullYear();
+                              const month = String(date.getMonth() + 1).padStart(2, '0');
+                              const day = String(date.getDate()).padStart(2, '0');
+                              const hours = String(date.getHours()).padStart(2, '0');
+                              const minutes = String(date.getMinutes()).padStart(2, '0');
+                              setEditedSchedule(`${year}-${month}-${day}T${hours}:${minutes}`);
+                            } else {
+                              setEditedSchedule('');
+                            }
                           }}
                         >
                           <Edit2 className="h-3 w-3" />
