@@ -194,14 +194,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       console.error('   Error message:', verifyError.message);
     } else if (verifyData) {
       console.log('✅ Verification fetch successful');
-      console.log('   Verified content in DB (first 100 chars):', verifyData.broadcast_content?.substring(0, 100));
-      console.log('   Verified content length in DB:', verifyData.broadcast_content?.length);
       console.log('   Verified updated_at in DB:', verifyData.updated_at);
-      console.log('   Content matches:', verifyData.broadcast_content === broadcast_content ? 'YES ✅' : 'NO ❌');
-      if (verifyData.broadcast_content !== broadcast_content) {
-        console.error('   ❌ MISMATCH DETECTED!');
-        console.error('   Expected (first 100):', broadcast_content.substring(0, 100));
-        console.error('   Got from DB (first 100):', verifyData.broadcast_content?.substring(0, 100));
+      
+      // Only verify broadcast_content if it was provided
+      if (broadcast_content !== undefined) {
+        console.log('   Verified content in DB (first 100 chars):', verifyData.broadcast_content?.substring(0, 100));
+        console.log('   Verified content length in DB:', verifyData.broadcast_content?.length);
+        console.log('   Content matches:', verifyData.broadcast_content === broadcast_content ? 'YES ✅' : 'NO ❌');
+        if (verifyData.broadcast_content !== broadcast_content) {
+          console.error('   ❌ MISMATCH DETECTED!');
+          console.error('   Expected (first 100):', broadcast_content?.substring(0, 100));
+          console.error('   Got from DB (first 100):', verifyData.broadcast_content?.substring(0, 100));
+        }
       }
     } else {
       console.warn('⚠️ Verification returned no data');
