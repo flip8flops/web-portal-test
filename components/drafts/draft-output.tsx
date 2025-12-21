@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase } from '@/src/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Loader2, Send, Ban, Edit2, Save, X } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Loader2, Send, Ban, Edit2, Save, X, RefreshCw } from 'lucide-react';
 
 interface DraftAudience {
   campaign_id: string;
@@ -37,15 +37,11 @@ interface DraftCampaign {
   updated_at: string;
 }
 
-interface DraftOutputProps {
-  campaignId: string | null;
-  onApproveAndSend: (selectedIds: string[]) => Promise<void>;
-  onReject: () => Promise<void>;
-}
-
-export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOutputProps) {
+// Self-contained component - no props needed
+export function DraftOutput() {
   const [draft, setDraft] = useState<DraftCampaign | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [selectedAudiences, setSelectedAudiences] = useState<Set<string>>(new Set());
   const [selectedAudienceDetail, setSelectedAudienceDetail] = useState<DraftAudience | null>(null);
   const [editingContent, setEditingContent] = useState<string | null>(null);
@@ -54,88 +50,68 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
   const [rejecting, setRejecting] = useState(false);
   const [showConfirmSend, setShowConfirmSend] = useState(false);
   const [showConfirmReject, setShowConfirmReject] = useState(false);
+  const [lastAction, setLastAction] = useState<'approved' | 'rejected' | null>(null);
 
+  // Fetch draft on mount
   useEffect(() => {
-    if (!campaignId) {
-      setDraft(null);
-      setLoading(false);
-      setSelectedAudienceDetail(null);
-      setSelectedAudiences(new Set());
-      return;
-    }
-
     fetchDraft();
-  }, [campaignId]);
+  }, []);
 
   const fetchDraft = async () => {
-    if (!campaignId) {
-      console.log('⚠️ DraftOutput: No campaignId provided');
-      return;
-    }
-
     setLoading(true);
+    setError(null);
+    
     try {
-      console.log('🔍 DraftOutput: Fetching draft for campaign:', campaignId);
-      // Use API endpoint
-      const response = await fetch(`/api/drafts?campaign_id=${campaignId}`);
-      console.log('📡 DraftOutput: API response status:', response.status);
+      console.log('🔍 [DraftOutput] Fetching most recent content_drafted campaign...');
+      
+      // Fetch most recent content_drafted campaign (no campaign_id needed)
+      const response = await fetch('/api/drafts');
+      console.log('📡 [DraftOutput] API response status:', response.status);
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('❌ DraftOutput: API error:', response.status, errorText);
+        console.error('❌ [DraftOutput] API error:', response.status, errorText);
         throw new Error(`Failed to fetch draft: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('📦 DraftOutput: API response data:', {
+      console.log('📦 [DraftOutput] API response:', {
         hasDraft: !!data.draft,
-        campaignId: data.draft?.campaign_id,
+        campaignId: data.draft?.campaign_id || data.campaign_id,
         audiencesCount: data.draft?.audiences?.length || 0,
+        message: data.message,
       });
       
-      if (!data.draft) {
-        console.warn('⚠️ DraftOutput: No draft in response');
+      if (!data.draft || !data.draft.audiences || data.draft.audiences.length === 0) {
+        console.log('ℹ️ [DraftOutput] No draft available');
         setDraft(null);
+        setSelectedAudienceDetail(null);
+        setSelectedAudiences(new Set());
         setLoading(false);
         return;
       }
 
-      console.log('✅ DraftOutput: Setting draft with', data.draft.audiences?.length || 0, 'audiences');
-      console.log('📦 Draft data:', {
-        campaign_name: data.draft.campaign_name || 'MISSING',
-        has_objective: !!data.draft.campaign_objective,
-        objective_preview: data.draft.campaign_objective ? data.draft.campaign_objective.substring(0, 50) : 'NONE',
-        has_origin_notes: !!data.draft.origin_notes,
-        origin_notes_preview: data.draft.origin_notes ? data.draft.origin_notes.substring(0, 50) : 'NONE',
-        tags_count: data.draft.campaign_tags?.length || 0,
-        tags: data.draft.campaign_tags || [],
-        total_audience: data.draft.total_matched_audience,
-      });
+      console.log('✅ [DraftOutput] Setting draft with', data.draft.audiences.length, 'audiences');
       
       // Update draft state
       setDraft(data.draft);
+      setLastAction(null); // Clear last action when we have a new draft
 
       // Auto-select first audience for detail view if none selected
-      // OR update selected audience with latest data if it exists
       if (data.draft.audiences.length > 0) {
         const currentSelected = selectedAudienceDetail?.audience_id;
         const foundAudience = data.draft.audiences.find((a: DraftAudience) => a.audience_id === currentSelected);
         if (foundAudience) {
-          // Update selected audience with latest data from server
-          console.log('🔄 Updating selected audience detail with fresh data from server');
-          console.log('   Audience ID:', foundAudience.audience_id);
-          console.log('   Content preview:', foundAudience.broadcast_content?.substring(0, 50) || 'EMPTY');
           setSelectedAudienceDetail(foundAudience);
-        } else if (!selectedAudienceDetail) {
-          // No selection yet, select first one
+        } else {
           setSelectedAudienceDetail(data.draft.audiences[0]);
         }
       }
       
       setLoading(false);
-    } catch (error) {
-      console.error('Error fetching draft:', error);
-    } finally {
+    } catch (err) {
+      console.error('❌ [DraftOutput] Error fetching draft:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch draft');
       setLoading(false);
     }
   };
@@ -160,33 +136,103 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
   };
 
   const handleApproveAndSend = async () => {
-    if (selectedAudiences.size === 0) return;
+    if (!draft || selectedAudiences.size === 0) return;
     
     setSending(true);
+    setError(null);
+    
     try {
       const selectedIds = Array.from(selectedAudiences);
-      await onApproveAndSend(selectedIds);
+      
+      // First approve
+      const approveResponse = await fetch('/api/drafts/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaign_id: draft.campaign_id,
+          audience_ids: selectedIds,
+        }),
+      });
+
+      if (!approveResponse.ok) {
+        const errorData = await approveResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to approve drafts');
+      }
+
+      // Then send
+      const sendResponse = await fetch('/api/drafts/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaign_id: draft.campaign_id,
+          audience_ids: selectedIds,
+        }),
+      });
+
+      if (!sendResponse.ok) {
+        const errorData = await sendResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to send broadcasts');
+      }
+
+      console.log('✅ [DraftOutput] Campaign approved and sent successfully');
+      
+      // Clear current draft and show success
+      setDraft(null);
+      setSelectedAudiences(new Set());
+      setSelectedAudienceDetail(null);
       setShowConfirmSend(false);
-      // Refresh draft data
-      await fetchDraft();
-    } catch (error) {
-      console.error('Error approving and sending:', error);
-      // Error will be shown by parent component
+      setLastAction('approved');
+      
+      // After a moment, try to load next draft (if any)
+      setTimeout(() => {
+        fetchDraft();
+      }, 2000);
+      
+    } catch (err) {
+      console.error('❌ [DraftOutput] Error approving and sending:', err);
+      setError(err instanceof Error ? err.message : 'Failed to approve and send');
     } finally {
       setSending(false);
     }
   };
 
   const handleReject = async () => {
+    if (!draft) return;
+    
     setRejecting(true);
+    setError(null);
+    
     try {
-      await onReject();
+      const response = await fetch('/api/drafts/reject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaign_id: draft.campaign_id,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to reject campaign');
+      }
+
+      console.log('✅ [DraftOutput] Campaign rejected successfully');
+      
+      // Clear current draft and show message
+      setDraft(null);
+      setSelectedAudiences(new Set());
+      setSelectedAudienceDetail(null);
       setShowConfirmReject(false);
-      // Refresh draft data
-      await fetchDraft();
-    } catch (error) {
-      console.error('Error rejecting:', error);
-      // Error will be shown by parent component
+      setLastAction('rejected');
+      
+      // After a moment, try to load next draft (if any)
+      setTimeout(() => {
+        fetchDraft();
+      }, 2000);
+      
+    } catch (err) {
+      console.error('❌ [DraftOutput] Error rejecting:', err);
+      setError(err instanceof Error ? err.message : 'Failed to reject campaign');
     } finally {
       setRejecting(false);
     }
@@ -201,14 +247,11 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
     if (!draft) return;
 
     try {
-      console.log('💾 Saving edited content for audience:', audienceId);
+      console.log('💾 [DraftOutput] Saving edited content for audience:', audienceId);
       
-      // Update broadcast_content in database via API endpoint
       const response = await fetch('/api/drafts/update-content', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           campaign_id: draft.campaign_id,
           audience_id: audienceId,
@@ -218,66 +261,38 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
 
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('Error updating content:', errorData);
-        alert('Failed to save changes: ' + (errorData.error || 'Unknown error'));
-        return;
+        throw new Error(errorData.error || 'Failed to save changes');
       }
 
-      console.log('✅ Content saved successfully to database');
+      console.log('✅ [DraftOutput] Content saved successfully');
       
-      // IMPORTANT: Don't re-fetch from server due to cache issues
-      // Instead, update local state directly with the saved content
-      console.log('🔄 Updating local state directly (bypassing server fetch to avoid cache)');
-      
-      // Update the audience in the audiences array
+      // Update local state directly (bypass cache issues)
       const updatedAudiences = draft.audiences.map((aud) => {
         if (aud.audience_id === audienceId) {
-          const updated = {
+          return {
             ...aud,
             broadcast_content: editedContent,
             character_count: editedContent.length,
-            updated_at: new Date().toISOString(),
           };
-          console.log('   Updated audience:', {
-            audience_id: aud.audience_id,
-            old_content: aud.broadcast_content.substring(0, 30) + '...',
-            new_content: editedContent.substring(0, 30) + '...',
-            old_length: aud.broadcast_content.length,
-            new_length: editedContent.length,
-          });
-          return updated;
         }
         return aud;
       });
       
-      // Update draft state with new audiences array
-      setDraft({
-        ...draft,
-        audiences: updatedAudiences,
-      });
+      setDraft({ ...draft, audiences: updatedAudiences });
       
-      // Update selected audience detail immediately
       if (selectedAudienceDetail?.audience_id === audienceId) {
-        const updatedDetail = {
+        setSelectedAudienceDetail({
           ...selectedAudienceDetail,
           broadcast_content: editedContent,
           character_count: editedContent.length,
-          updated_at: new Date().toISOString(),
-        };
-        
-        console.log('✅ Updated selected audience detail locally');
-        console.log('   Content preview:', updatedDetail.broadcast_content.substring(0, 50));
-        console.log('   Content length:', updatedDetail.character_count);
-        
-        setSelectedAudienceDetail(updatedDetail);
+        });
       }
       
-      // Close edit mode
       setEditingContent(null);
       setEditedContent('');
-    } catch (error) {
-      console.error('Error saving edit:', error);
-      alert('Failed to save changes. Please try again.');
+    } catch (err) {
+      console.error('❌ [DraftOutput] Error saving edit:', err);
+      setError(err instanceof Error ? err.message : 'Failed to save changes');
     }
   };
 
@@ -286,34 +301,82 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
     setEditedContent('');
   };
 
+  // Loading state
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+        <span className="ml-2 text-gray-600">Loading drafts...</span>
       </div>
     );
   }
 
+  // Error state
+  if (error) {
+    return (
+      <div className="space-y-4">
+        <Alert className="border-red-500 bg-red-50 dark:bg-red-950">
+          <AlertDescription className="text-red-700 dark:text-red-300">{error}</AlertDescription>
+        </Alert>
+        <div className="flex justify-center">
+          <Button onClick={fetchDraft} variant="outline">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Try Again
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // No draft available - show message and refresh button
   if (!draft || draft.audiences.length === 0) {
     return (
-      <Card>
-        <CardContent className="py-12 text-center text-gray-500">
-          No draft available. Generate a campaign first.
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        {lastAction === 'approved' && (
+          <Alert className="border-green-500 bg-green-50 dark:bg-green-950">
+            <AlertDescription className="text-green-700 dark:text-green-300">
+              Campaign has been approved and sent successfully!
+            </AlertDescription>
+          </Alert>
+        )}
+        {lastAction === 'rejected' && (
+          <Alert className="border-orange-500 bg-orange-50 dark:bg-orange-950">
+            <AlertDescription className="text-orange-700 dark:text-orange-300">
+              Campaign has been rejected.
+            </AlertDescription>
+          </Alert>
+        )}
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-gray-500 mb-4">No draft campaign available.</p>
+            <p className="text-sm text-gray-400 mb-6">
+              Generate a new campaign in the Input tab, or click refresh to check for drafts.
+            </p>
+            <Button onClick={fetchDraft} variant="outline">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Load Drafts
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      {/* Refresh Button */}
+      <div className="flex justify-end">
+        <Button onClick={fetchDraft} variant="outline" size="sm">
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </Button>
+      </div>
+
       {/* Campaign Info */}
       <Card>
         <CardHeader>
           <CardTitle className="text-2xl font-bold">
             {draft.campaign_name || 'Untitled Campaign'}
-            {!draft.campaign_name && (
-              <span className="text-xs text-red-500 ml-2">(Title not found in meta)</span>
-            )}
           </CardTitle>
           
           {/* Objective */}
@@ -369,11 +432,7 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
       {/* Action Buttons */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleSelectAll}
-          >
+          <Button variant="outline" size="sm" onClick={handleSelectAll}>
             {selectedAudiences.size === draft.audiences.length ? 'Deselect All' : 'Select All'}
           </Button>
           <span className="text-sm text-gray-600">
@@ -490,6 +549,10 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
                 {/* Audience Info */}
                 <div className="space-y-2">
                   <div>
+                    <p className="text-sm font-medium text-gray-500">Audience Name</p>
+                    <p className="text-base font-semibold">{selectedAudienceDetail.audience_name}</p>
+                  </div>
+                  <div>
                     <p className="text-sm font-medium text-gray-500">Send To</p>
                     <p className="text-base">{selectedAudienceDetail.send_to || selectedAudienceDetail.source_contact_id || 'Unknown'}</p>
                   </div>
@@ -514,29 +577,17 @@ export function DraftOutput({ campaignId, onApproveAndSend, onReject }: DraftOut
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium text-gray-500">Draft Message</p>
                     {editingContent !== selectedAudienceDetail.audience_id ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleEditContent(selectedAudienceDetail)}
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => handleEditContent(selectedAudienceDetail)}>
                         <Edit2 className="h-4 w-4 mr-1" />
                         Edit
                       </Button>
                     ) : (
                       <div className="flex gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleSaveEdit(selectedAudienceDetail.audience_id)}
-                        >
+                        <Button variant="ghost" size="sm" onClick={() => handleSaveEdit(selectedAudienceDetail.audience_id)}>
                           <Save className="h-4 w-4 mr-1" />
                           Save
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleCancelEdit}
-                        >
+                        <Button variant="ghost" size="sm" onClick={handleCancelEdit}>
                           <X className="h-4 w-4 mr-1" />
                           Cancel
                         </Button>
