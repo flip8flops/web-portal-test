@@ -22,6 +22,7 @@ interface DraftAudience {
   matchmaker_reason?: any;
   campaign_objective?: string;
   campaign_image_url?: string;
+  scheduled_at?: string | null;
 }
 
 interface DraftCampaign {
@@ -46,6 +47,8 @@ export function DraftOutput() {
   const [selectedAudienceDetail, setSelectedAudienceDetail] = useState<DraftAudience | null>(null);
   const [editingContent, setEditingContent] = useState<string | null>(null);
   const [editedContent, setEditedContent] = useState<string>('');
+  const [editingSchedule, setEditingSchedule] = useState<string | null>(null);
+  const [editedSchedule, setEditedSchedule] = useState<string>('');
   const [sending, setSending] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [showConfirmSend, setShowConfirmSend] = useState(false);
@@ -310,6 +313,53 @@ export function DraftOutput() {
     setEditedContent('');
   };
 
+  const handleSaveSchedule = async (audienceId: string) => {
+    if (!draft) return;
+
+    try {
+      console.log('📅 [DraftOutput] Saving schedule for audience:', audienceId, editedSchedule);
+      
+      const scheduledAt = editedSchedule ? new Date(editedSchedule).toISOString() : null;
+      
+      const response = await fetch('/api/drafts/update-content', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaign_id: draft.campaign_id,
+          audience_id: audienceId,
+          scheduled_at: scheduledAt,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to save schedule');
+      }
+
+      console.log('✅ [DraftOutput] Schedule saved successfully');
+      
+      // Update local state
+      const updatedAudiences = draft.audiences.map((aud) => {
+        if (aud.audience_id === audienceId) {
+          return { ...aud, scheduled_at: scheduledAt };
+        }
+        return aud;
+      });
+      
+      setDraft({ ...draft, audiences: updatedAudiences });
+      
+      if (selectedAudienceDetail?.audience_id === audienceId) {
+        setSelectedAudienceDetail({ ...selectedAudienceDetail, scheduled_at: scheduledAt });
+      }
+      
+      setEditingSchedule(null);
+      setEditedSchedule('');
+    } catch (err) {
+      console.error('❌ [DraftOutput] Error saving schedule:', err);
+      setError(err instanceof Error ? err.message : 'Failed to save schedule');
+    }
+  };
+
   // Loading state
   if (loading) {
     return (
@@ -568,6 +618,50 @@ export function DraftOutput() {
                   <div>
                     <p className="text-sm font-medium text-gray-500">Channel</p>
                     <Badge>{selectedAudienceDetail.channel}</Badge>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-500">Scheduled Send Time</p>
+                    {editingSchedule === selectedAudienceDetail.audience_id ? (
+                      <div className="flex items-center gap-2 mt-1">
+                        <input
+                          type="datetime-local"
+                          value={editedSchedule}
+                          onChange={(e) => setEditedSchedule(e.target.value)}
+                          className="flex-1 px-2 py-1 text-sm border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <Button variant="ghost" size="sm" onClick={() => handleSaveSchedule(selectedAudienceDetail.audience_id)}>
+                          <Save className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => { setEditingSchedule(null); setEditedSchedule(''); }}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <p className="text-base">
+                          {selectedAudienceDetail.scheduled_at 
+                            ? new Date(selectedAudienceDetail.scheduled_at).toLocaleString('id-ID', { 
+                                dateStyle: 'medium', 
+                                timeStyle: 'short' 
+                              })
+                            : 'Not scheduled'}
+                        </p>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => {
+                            setEditingSchedule(selectedAudienceDetail.audience_id);
+                            setEditedSchedule(
+                              selectedAudienceDetail.scheduled_at 
+                                ? new Date(selectedAudienceDetail.scheduled_at).toISOString().slice(0, 16)
+                                : ''
+                            );
+                          }}
+                        >
+                          <Edit2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                   {selectedAudienceDetail.matchmaker_reason && (
                     <div>

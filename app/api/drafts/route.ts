@@ -169,7 +169,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const { data: audienceData, error: audienceError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign_audience')
-      .select('id, campaign_id, audience_id, broadcast_content, meta, target_status, created_at, updated_at')
+      .select('id, campaign_id, audience_id, broadcast_content, meta, target_status, scheduled_at, created_at, updated_at')
       .eq('campaign_id', latestDraftCampaignId)
       .not('broadcast_content', 'is', null)
       .neq('broadcast_content', '')
@@ -264,6 +264,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         guardrails_violations: guardrails.violations || [],
         matchmaker_reason: meta.matchmaker_reason,
         target_status: item.target_status || 'pending',
+        scheduled_at: item.scheduled_at || null,
         created_at: item.created_at,
         updated_at: item.updated_at,
       };

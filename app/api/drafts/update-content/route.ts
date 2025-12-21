@@ -15,23 +15,36 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 /**
  * POST /api/drafts/update-content
- * Update broadcast_content for a specific audience
+ * Update broadcast_content and/or scheduled_at for a specific audience
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const body = await request.json();
-    const { campaign_id, audience_id, broadcast_content } = body;
+    const { campaign_id, audience_id, broadcast_content, scheduled_at } = body;
 
-    if (!campaign_id || !audience_id || !broadcast_content) {
+    if (!campaign_id || !audience_id) {
       return NextResponse.json(
-        { error: 'Missing required fields: campaign_id, audience_id, broadcast_content' },
+        { error: 'Missing required fields: campaign_id, audience_id' },
         { status: 400 }
       );
     }
 
-    console.log('💾 Updating broadcast_content for:', { campaign_id, audience_id });
-    console.log('   Content to save (first 100 chars):', broadcast_content.substring(0, 100));
-    console.log('   Content length:', broadcast_content.length);
+    // At least one of broadcast_content or scheduled_at must be provided
+    if (broadcast_content === undefined && scheduled_at === undefined) {
+      return NextResponse.json(
+        { error: 'Must provide either broadcast_content or scheduled_at' },
+        { status: 400 }
+      );
+    }
+
+    console.log('💾 Updating audience data for:', { campaign_id, audience_id });
+    if (broadcast_content !== undefined) {
+      console.log('   Content to save (first 100 chars):', broadcast_content.substring(0, 100));
+      console.log('   Content length:', broadcast_content.length);
+    }
+    if (scheduled_at !== undefined) {
+      console.log('   Scheduled_at to save:', scheduled_at);
+    }
     const beforeUpdateTime = new Date();
     console.log('   Timestamp before update:', beforeUpdateTime.toISOString());
 
@@ -79,17 +92,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const updateTimestamp = new Date().toISOString();
     console.log('   Update timestamp to set:', updateTimestamp);
     
+    // Build update object dynamically based on what was provided
+    const updateObj: Record<string, any> = {
+      updated_at: updateTimestamp,
+    };
+    
+    if (broadcast_content !== undefined) {
+      updateObj.broadcast_content = broadcast_content;
+    }
+    
+    if (scheduled_at !== undefined) {
+      updateObj.scheduled_at = scheduled_at;
+    }
+    
     // Update ALL rows with this campaign_id + audience_id
     const { data: updateData, error, count } = await updateSupabase
       .schema('citia_mora_datamart')
       .from('campaign_audience')
-      .update({
-        broadcast_content: broadcast_content,
-        updated_at: updateTimestamp,
-      })
+      .update(updateObj)
       .eq('campaign_id', campaign_id)
       .eq('audience_id', audience_id)
-      .select('id, broadcast_content, updated_at'); // Select to verify update
+      .select('id, broadcast_content, scheduled_at, updated_at'); // Select to verify update
 
     if (error) {
       console.error('❌ Error updating content:', error);
@@ -102,11 +125,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    console.log('✅ Content updated successfully');
+    console.log('✅ Data updated successfully');
     console.log('   Update result:', updateData);
     if (updateData && updateData.length > 0) {
-      console.log('   Verified saved content (first 100 chars):', updateData[0].broadcast_content?.substring(0, 100));
-      console.log('   Verified saved content length:', updateData[0].broadcast_content?.length);
+      if (broadcast_content !== undefined) {
+        console.log('   Verified saved content (first 100 chars):', updateData[0].broadcast_content?.substring(0, 100));
+        console.log('   Verified saved content length:', updateData[0].broadcast_content?.length);
+      }
+      if (scheduled_at !== undefined) {
+        console.log('   Verified scheduled_at:', updateData[0].scheduled_at);
+      }
       console.log('   Updated at:', updateData[0].updated_at);
     } else {
       console.warn('⚠️ Update returned no data - might indicate no rows were updated');
