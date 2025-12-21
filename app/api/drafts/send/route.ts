@@ -2,32 +2,51 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY!;
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('❌ Missing Supabase configuration');
+}
 
 /**
  * POST /api/drafts/send
  * Send approved drafts via WhatsApp (unofficial API)
+ * This is called AFTER approve endpoint updates statuses
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  // Create FRESH client for each request
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+
   try {
     const body = await request.json();
     const { campaign_id, audience_ids } = body;
 
-    if (!campaign_id || !Array.isArray(audience_ids) || audience_ids.length === 0) {
-      return NextResponse.json(
-        { error: 'campaign_id and audience_ids are required' },
-        { status: 400 }
-      );
+    console.log(`\n📤 [POST /api/drafts/send] ==========================================`);
+    console.log(`📤 [POST /api/drafts/send] Campaign ID: ${campaign_id}`);
+    console.log(`📤 [POST /api/drafts/send] Audiences to send: ${audience_ids?.length || 0}`);
+
+    if (!campaign_id) {
+      return createResponse({ error: 'campaign_id is required' }, 400);
     }
 
+    if (!Array.isArray(audience_ids) || audience_ids.length === 0) {
+      return createResponse({ error: 'audience_ids is required and must be non-empty array' }, 400);
+    }
+
+    const sendTimestamp = new Date().toISOString();
     const results: Array<{ audience_id: string; success: boolean; error?: string }> = [];
 
-    // Get draft content for each audience
+    // Process each audience
     for (const audienceId of audience_ids) {
+      // Get audience data with broadcast content
       const { data: audienceData, error: fetchError } = await supabase
         .schema('citia_mora_datamart')
         .from('campaign_audience')
@@ -37,127 +56,84 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         .single();
 
       if (fetchError || !audienceData) {
-        results.push({
-          audience_id: audienceId,
-          success: false,
-          error: 'Failed to fetch audience data',
-        });
+        results.push({ audience_id: audienceId, success: false, error: 'Failed to fetch audience data' });
         continue;
       }
 
-      // Get audience details separately
-      const { data: audienceDetail, error: detailError } = await supabase
+      // Get audience details
+      const { data: detail, error: detailError } = await supabase
         .schema('citia_mora_datamart')
         .from('audience')
-        .select('source_contact_id, wa_opt_in')
+        .select('source_contact_id, wa_opt_in, phone_e164')
         .eq('id', audienceId)
         .single();
 
-      if (detailError || !audienceDetail) {
-        results.push({
-          audience_id: audienceId,
-          success: false,
-          error: 'Failed to fetch audience details',
-        });
+      if (detailError || !detail) {
+        results.push({ audience_id: audienceId, success: false, error: 'Failed to fetch audience details' });
         continue;
       }
 
       const broadcastContent = audienceData.broadcast_content;
-      const sourceContactId = audienceDetail.source_contact_id;
+      const phoneNumber = detail.phone_e164 || detail.source_contact_id;
 
-      if (!broadcastContent || !sourceContactId) {
-        results.push({
-          audience_id: audienceId,
-          success: false,
-          error: 'Missing broadcast content or phone number',
-        });
+      if (!broadcastContent || !phoneNumber) {
+        results.push({ audience_id: audienceId, success: false, error: 'Missing content or phone' });
         continue;
       }
 
-      // Format phone number (remove +, ensure country code)
-      let phoneNumber = sourceContactId;
-      if (phoneNumber.includes(':')) {
-        phoneNumber = phoneNumber.split(':')[1];
-      }
-      phoneNumber = phoneNumber.replace(/^\+/, '');
-
       // TODO: Call WhatsApp unofficial API
-      // For now, simulate success
       const sendResult = await sendWhatsAppMessage(phoneNumber, broadcastContent);
 
-      // Get current meta
+      // Update status based on result
       const currentMeta = audienceData.meta || {};
+      const newStatus = sendResult.success ? 'sent' : 'failed';
 
-      if (sendResult.success) {
-        // Update status to sent
-        const { error: updateError } = await supabase
-          .schema('citia_mora_datamart')
-          .from('campaign_audience')
-          .update({
-            target_status: 'sent',
-            meta: {
-              ...currentMeta,
-              send: {
-                sent_at: new Date().toISOString(),
-                sent_status: 'sent',
-                send_error: null,
-              },
+      const { error: updateError } = await supabase
+        .schema('citia_mora_datamart')
+        .from('campaign_audience')
+        .update({
+          target_status: newStatus,
+          meta: {
+            ...currentMeta,
+            send: {
+              sent_at: sendTimestamp,
+              sent_status: newStatus,
+              send_error: sendResult.error || null,
+              message_id: sendResult.messageId || null,
             },
-            updated_at: new Date().toISOString(),
-          })
-          .eq('campaign_id', campaign_id)
-          .eq('audience_id', audienceId);
+          },
+          updated_at: sendTimestamp,
+        })
+        .eq('campaign_id', campaign_id)
+        .eq('audience_id', audienceId);
 
-        if (updateError) {
-          console.error(`Error updating send status for ${audienceId}:`, updateError);
-        }
-
-        results.push({
-          audience_id: audienceId,
-          success: true,
-        });
-      } else {
-        // Update status to failed
-        const { error: updateError } = await supabase
-          .schema('citia_mora_datamart')
-          .from('campaign_audience')
-          .update({
-            target_status: 'failed',
-            meta: {
-              ...currentMeta,
-              send: {
-                sent_at: new Date().toISOString(),
-                sent_status: 'failed',
-                send_error: sendResult.error || 'Unknown error',
-              },
-            },
-            updated_at: new Date().toISOString(),
-          })
-          .eq('campaign_id', campaign_id)
-          .eq('audience_id', audienceId);
-
-        results.push({
-          audience_id: audienceId,
-          success: false,
-          error: sendResult.error || 'Failed to send',
-        });
+      if (updateError) {
+        console.error(`Error updating send status for ${audienceId}:`, updateError.message);
       }
+
+      results.push({
+        audience_id: audienceId,
+        success: sendResult.success,
+        error: sendResult.error,
+      });
     }
 
-    // Update campaign status if all sent
-    const allSent = results.every(r => r.success);
-    if (allSent) {
-      // Update campaign status to 'sent'
+    // Update campaign status to 'sent' if all were successful
+    const successCount = results.filter(r => r.success).length;
+    const failedCount = results.filter(r => !r.success).length;
+
+    if (successCount > 0) {
+      console.log('📝 Updating campaign status to sent...');
       await supabase
         .schema('citia_mora_datamart')
         .from('campaign')
         .update({
           status: 'sent',
-          updated_at: new Date().toISOString(),
+          updated_at: sendTimestamp,
         })
         .eq('id', campaign_id);
 
-      // Insert status update: campaign approved/sent
+      // Insert status update
       await supabase
         .schema('citia_mora_datamart')
         .from('campaign_status_updates')
@@ -169,23 +145,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           progress: 100,
           metadata: {
             workflow_point: 'broadcast_sent',
-            sent_count: results.length,
+            sent_count: successCount,
+            failed_count: failedCount,
+            sent_at: sendTimestamp,
           },
         });
     }
 
-    return NextResponse.json({
+    console.log(`✅ [POST /api/drafts/send] Sent: ${successCount}, Failed: ${failedCount}`);
+    console.log(`📤 [POST /api/drafts/send] ==========================================\n`);
+
+    return createResponse({
       success: true,
       results,
-      sent_count: results.filter(r => r.success).length,
-      failed_count: results.filter(r => !r.success).length,
+      sent_count: successCount,
+      failed_count: failedCount,
     });
-  } catch (error) {
-    console.error('Error in POST /api/drafts/send:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+  } catch (error: any) {
+    console.error('❌ Error:', error);
+    return createResponse({
+      error: 'Internal server error',
+      details: error?.message,
+    }, 500);
   }
 }
 
@@ -197,36 +178,28 @@ async function sendWhatsAppMessage(
   phoneNumber: string,
   message: string
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  // TODO: Implement actual WhatsApp API call
-  // For now, simulate success
-  console.log(`[SIMULATED] Sending WhatsApp to ${phoneNumber}: ${message.substring(0, 50)}...`);
+  // Format phone number
+  let phone = phoneNumber;
+  if (phone.includes(':')) {
+    phone = phone.split(':')[1];
+  }
+  phone = phone.replace(/^\+/, '');
+
+  console.log(`[SIMULATED] Sending WhatsApp to ${phone}: ${message.substring(0, 50)}...`);
   
   // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await new Promise(resolve => setTimeout(resolve, 200));
 
   // TODO: Replace with actual API call
-  // Example:
-  // const response = await fetch(WHATSAPP_API_URL, {
-  //   method: 'POST',
-  //   headers: {
-  //     'Content-Type': 'application/json',
-  //     'Authorization': `Bearer ${WHATSAPP_API_KEY}`,
-  //   },
-  //   body: JSON.stringify({
-  //     to: phoneNumber,
-  //     message: message,
-  //   }),
-  // });
-  // 
-  // if (!response.ok) {
-  //   return { success: false, error: `API error: ${response.status}` };
-  // }
-  // 
-  // const data = await response.json();
-  // return { success: true, messageId: data.message_id };
-
   return {
     success: true,
     messageId: `sim_${Date.now()}`,
   };
+}
+
+function createResponse(data: any, status: number = 200): NextResponse {
+  const response = NextResponse.json(data, { status });
+  response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  response.headers.set('Pragma', 'no-cache');
+  return response;
 }
