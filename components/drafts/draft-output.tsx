@@ -62,10 +62,19 @@ export function DraftOutput() {
     setError(null);
     
     try {
-      console.log('🔍 [DraftOutput] Fetching most recent content_drafted campaign...');
+      // Add timestamp to bust cache
+      const timestamp = Date.now();
+      console.log(`🔍 [DraftOutput] Fetching drafts at ${new Date(timestamp).toISOString()}...`);
       
-      // Fetch most recent content_drafted campaign (no campaign_id needed)
-      const response = await fetch('/api/drafts');
+      // Fetch most recent content_drafted campaign with cache-busting
+      const response = await fetch(`/api/drafts?_t=${timestamp}`, {
+        method: 'GET',
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
+        },
+      });
       console.log('📡 [DraftOutput] API response status:', response.status);
       
       if (!response.ok) {

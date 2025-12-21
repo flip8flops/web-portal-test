@@ -1,596 +1,239 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+// Force dynamic rendering - no caching
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL!;
-// Use anon key (same as StatusDisplay component) to match permissions
-// StatusDisplay successfully queries campaign_status_updates with anon key
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY!;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error('❌ Missing Supabase configuration');
-  console.error('   NEXT_PUBLIC_SUPABASE_URL:', supabaseUrl ? 'SET' : 'MISSING');
-  console.error('   NEXT_PUBLIC_SUPABASE_ANON_KEY:', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'SET' : 'MISSING');
-  console.error('   SUPABASE_ANON_KEY (fallback):', process.env.SUPABASE_ANON_KEY ? 'SET' : 'MISSING');
 }
-
-// Use anon key (same as StatusDisplay) to ensure same permission level
-// This matches the client-side approach that successfully queries campaign_status_updates
-const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
 
 /**
  * GET /api/drafts
- * Get draft campaign with audiences that have broadcast_content
+ * Get the most recent draft campaign with status='content_drafted'
+ * ALWAYS queries fresh data from database (no caching)
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  // Create a FRESH Supabase client for each request to avoid any caching
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+
   try {
-    console.log('🔍 GET /api/drafts - Starting...');
-    console.log('🔍 Supabase URL:', supabaseUrl ? `${supabaseUrl.substring(0, 30)}...` : 'MISSING');
-    console.log('🔍 Anon Key:', supabaseAnonKey ? `${supabaseAnonKey.substring(0, 20)}...` : 'MISSING');
+    const timestamp = new Date().toISOString();
+    console.log(`\n🔍 [GET /api/drafts] ==========================================`);
+    console.log(`🔍 [GET /api/drafts] Request at: ${timestamp}`);
     
     const searchParams = request.nextUrl.searchParams;
-    const campaignId = searchParams.get('campaign_id');
-    console.log('🔍 Request campaign_id param:', campaignId || 'none');
+    const campaignIdParam = searchParams.get('campaign_id');
+    console.log(`🔍 [GET /api/drafts] campaign_id param: ${campaignIdParam || 'none'}`);
 
-    // Find latest campaign with status "content_drafted"
-    // CRITICAL: Query campaign table FIRST (source of truth) before checking status updates
-    // This avoids race conditions where campaign.status is updated but status_updates haven't synced yet
-    let latestDraftCampaignId = campaignId;
+    // STEP 1: Query campaign table for most recent content_drafted
+    // This is the SOURCE OF TRUTH - always query fresh
+    console.log(`🔍 [GET /api/drafts] STEP 1: Querying campaign table for status="content_drafted"...`);
+    
+    const { data: campaignData, error: campaignError } = await supabase
+      .schema('citia_mora_datamart')
+      .from('campaign')
+      .select('id, status, updated_at')
+      .eq('status', 'content_drafted')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    if (!latestDraftCampaignId) {
-      console.log('🔍 [API /api/drafts] Querying for draft campaign...');
-      
-      // STEP 1: PRIORITY - Query campaign table directly (source of truth)
-      // This is the most reliable way to find content_drafted campaigns
-      console.log('🔍 [API /api/drafts] STEP 1: Querying campaign table for status="content_drafted"...');
-      const { data: campaignData, error: campaignError } = await supabase
-        .schema('citia_mora_datamart')
-        .from('campaign')
-        .select('id, status, updated_at')
-        .eq('status', 'content_drafted')
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (campaignError) {
-        console.error('❌ [API /api/drafts] Error querying campaign table:', campaignError);
-        console.error('   Error code:', campaignError.code);
-        console.error('   Error message:', campaignError.message);
-        console.log('⚠️ [API /api/drafts] Permission error on campaign table - falling back to status updates');
-      } else if (campaignData && campaignData.id && campaignData.status === 'content_drafted') {
-        latestDraftCampaignId = campaignData.id;
-        console.log('✅ [API /api/drafts] Found draft campaign from campaign.status (STEP 1):', latestDraftCampaignId);
-        console.log('   Campaign status confirmed: content_drafted');
-        console.log('   Updated at:', campaignData.updated_at);
-      } else {
-        console.log('ℹ️ [API /api/drafts] No campaign found with status="content_drafted" in STEP 1');
-        if (campaignData) {
-          console.log(`   Found campaign but status is: ${campaignData.status} (not content_drafted)`);
-        }
-      }
-      
-      // STEP 2: Fallback - Query campaign_status_updates if direct query failed or returned nothing
-      // This handles cases where permission is an issue or there's a timing issue
-      if (!latestDraftCampaignId) {
-        console.log('🔍 [API /api/drafts] STEP 2: Fallback - Querying campaign_status_updates for content_maker_agent completed...');
-        const { data: statusData, error: statusError } = await supabase
-          .schema('citia_mora_datamart')
-          .from('campaign_status_updates')
-          .select('campaign_id, agent_name, status, message, updated_at, metadata')
-          .eq('agent_name', 'content_maker_agent')
-          .eq('status', 'completed')
-          .order('updated_at', { ascending: false })
-          .limit(10);
-
-        if (statusError) {
-          console.error('❌ [API /api/drafts] Error querying campaign_status_updates:', statusError);
-        } else if (statusData && statusData.length > 0) {
-          // Find the latest one that has a valid campaign_id AND check if campaign status is still content_drafted
-          for (const status of statusData) {
-            if (!status.campaign_id) continue;
-            
-            // CRITICAL: Check campaign.status to ensure it's still content_drafted (not rejected/approved)
-            console.log('🔍 [API /api/drafts] Checking campaign status for:', status.campaign_id);
-            const { data: campaignCheck, error: checkError } = await supabase
-              .schema('citia_mora_datamart')
-              .from('campaign')
-              .select('id, status')
-              .eq('id', status.campaign_id)
-              .single();
-            
-            if (checkError) {
-              console.warn('⚠️ [API /api/drafts] Cannot check campaign status:', checkError.message);
-              continue;
-            }
-            
-            if (campaignCheck && campaignCheck.status === 'content_drafted') {
-              latestDraftCampaignId = status.campaign_id;
-              console.log('✅ [API /api/drafts] Found draft campaign from campaign_status_updates (STEP 2):', latestDraftCampaignId);
-              console.log('   Campaign status confirmed: content_drafted');
-              break;
-            } else {
-              console.log(`   Campaign ${status.campaign_id} status is: ${campaignCheck?.status || 'unknown'} - skipping (not content_drafted)`);
-            }
-          }
-        } else {
-          console.log('ℹ️ [API /api/drafts] No content_maker_agent completed status found in STEP 2');
-        }
-      }
+    if (campaignError) {
+      console.error(`❌ [GET /api/drafts] Error querying campaign:`, campaignError.message);
+      return createResponse({
+        draft: null,
+        campaign_id: null,
+        message: 'Error querying campaigns',
+        error: campaignError.message,
+      });
     }
 
-    if (!latestDraftCampaignId) {
-      console.log('✅ No draft campaign found (all campaigns are either approved, rejected, or not yet drafted)');
-      return NextResponse.json({
+    if (!campaignData || !campaignData.id) {
+      console.log(`ℹ️ [GET /api/drafts] No campaign with status="content_drafted" found`);
+      return createResponse({
         draft: null,
         campaign_id: null,
         message: 'No draft campaign found',
       });
     }
 
-    // FINAL VERIFICATION: Double-check that the campaign is still content_drafted
-    // This ensures we don't return a campaign that was just rejected/approved
-    console.log('🔍 [API /api/drafts] Final verification: Checking campaign status one more time...');
-    const { data: finalCheck, error: finalCheckError } = await supabase
+    const latestDraftCampaignId = campaignData.id;
+    console.log(`✅ [GET /api/drafts] Found draft campaign: ${latestDraftCampaignId}`);
+    console.log(`   Status: ${campaignData.status}`);
+    console.log(`   Updated at: ${campaignData.updated_at}`);
+
+    // STEP 2: Get full campaign details
+    console.log(`🔍 [GET /api/drafts] STEP 2: Fetching full campaign details...`);
+    
+    const { data: fullCampaign, error: fullError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign')
-      .select('id, status, updated_at')
+      .select('id, name, objective, meta, matchmaker_strategy, created_at, updated_at, status')
       .eq('id', latestDraftCampaignId)
       .single();
-    
-    if (finalCheckError) {
-      console.warn('⚠️ [API /api/drafts] Cannot verify campaign status:', finalCheckError.message);
-      // Continue anyway - might be permission issue
-    } else if (finalCheck) {
-      console.log(`📊 [API /api/drafts] Database State:`);
-      console.log(`   Campaign ID: ${finalCheck.id}`);
-      console.log(`   Status: ${finalCheck.status}`);
-      console.log(`   Updated At: ${finalCheck.updated_at}`);
-      
-      // CRITICAL: Check for rejected/approved FIRST before checking content_drafted
-      if (finalCheck.status === 'rejected') {
-        console.log(`❌ [API /api/drafts] Campaign ${latestDraftCampaignId} status is "rejected" - returning null`);
-        return NextResponse.json({
-          draft: null,
-          campaign_id: latestDraftCampaignId,
-          message: 'Campaign has been rejected',
-        });
-      }
-      if (finalCheck.status === 'approved' || finalCheck.status === 'sent') {
-        console.log(`❌ [API /api/drafts] Campaign ${latestDraftCampaignId} status is "${finalCheck.status}" - returning null`);
-        return NextResponse.json({
-          draft: null,
-          campaign_id: latestDraftCampaignId,
-          message: `Campaign has been ${finalCheck.status}`,
-        });
-      }
-      
-      if (finalCheck.status !== 'content_drafted') {
-        console.log(`❌ [API /api/drafts] Campaign ${latestDraftCampaignId} status is "${finalCheck.status}", not "content_drafted" - returning null`);
-        return NextResponse.json({
-          draft: null,
-          campaign_id: latestDraftCampaignId,
-          message: `No draft campaign found (campaign status is "${finalCheck.status}", not "content_drafted")`,
-        });
-      } else {
-        console.log('✅ [API /api/drafts] Final verification passed: Campaign status is content_drafted');
-      }
+
+    if (fullError) {
+      console.error(`❌ [GET /api/drafts] Error fetching campaign details:`, fullError.message);
+      return createResponse({
+        draft: null,
+        campaign_id: latestDraftCampaignId,
+        message: 'Error fetching campaign details',
+      });
     }
 
-    console.log('✅ Using draft campaign ID:', latestDraftCampaignId);
+    // Double-check status is still content_drafted (might have changed between queries)
+    if (fullCampaign.status !== 'content_drafted') {
+      console.log(`⚠️ [GET /api/drafts] Campaign status changed to "${fullCampaign.status}" - returning null`);
+      return createResponse({
+        draft: null,
+        campaign_id: latestDraftCampaignId,
+        message: `Campaign status is "${fullCampaign.status}", not "content_drafted"`,
+      });
+    }
 
-    // Get campaign info from campaign table (now has SELECT permission)
-    console.log('🔍 Fetching campaign info for ID:', latestDraftCampaignId);
+    // Extract campaign info from meta
+    const meta = fullCampaign.meta || {};
+    const researchPayload = meta.research_payload || {};
+    const campaignBrief = researchPayload.campaign_brief || {};
     
-    let campaignName = 'Untitled Campaign';
-    let campaignObjective = '';
-    let campaignCreatedAt = new Date().toISOString();
-    let campaignUpdatedAt = new Date().toISOString();
+    const campaignName = campaignBrief.title || fullCampaign.name || 'Untitled Campaign';
+    const campaignObjective = campaignBrief.objective || fullCampaign.objective || '';
+    const originNotes = meta.origin_raw_admin_notes || '';
+    const matchmakerResult = meta.matchmaker_result || {};
+    let totalMatchedAudience = matchmakerResult.total_matched || 0;
+    
+    // Get tags
     let campaignTags: string[] = [];
-    let originNotes = '';
-    let totalMatchedAudience = 0;
-
-    // Try to get campaign info from campaign table FIRST
-    console.log('🔍 Attempting to fetch campaign from table with ID:', latestDraftCampaignId);
-    const { data: campaignTableData, error: campaignError } = await supabase
-      .schema('citia_mora_datamart')
-      .from('campaign')
-      .select('id, name, objective, meta, matchmaker_strategy, created_at, updated_at')
-      .eq('id', latestDraftCampaignId)
-      .single();
-
-    if (campaignError) {
-      console.error('❌ Error fetching campaign table:', campaignError);
-      console.error('   Code:', campaignError.code);
-      console.error('   Message:', campaignError.message);
-      console.error('   Details:', campaignError.details);
-      console.error('   Hint:', campaignError.hint);
-      console.log('⚠️ Cannot access campaign table, will try fallback');
-    } else if (campaignTableData) {
-      console.log('✅ Campaign table data fetched successfully');
-      console.log('   Campaign ID:', campaignTableData.id);
-      console.log('   Raw name:', campaignTableData.name || 'NULL');
-      console.log('   Raw objective:', campaignTableData.objective ? campaignTableData.objective.substring(0, 50) + '...' : 'NULL');
-      console.log('   Has meta:', !!campaignTableData.meta);
-      console.log('   Meta type:', typeof campaignTableData.meta);
-      if (campaignTableData.meta) {
-        console.log('   Meta keys:', Object.keys(campaignTableData.meta));
-        console.log('   Meta research_payload exists:', !!campaignTableData.meta.research_payload);
-        if (campaignTableData.meta.research_payload) {
-          console.log('   Meta research_payload keys:', Object.keys(campaignTableData.meta.research_payload));
-          console.log('   Meta campaign_brief exists:', !!campaignTableData.meta.research_payload.campaign_brief);
-          if (campaignTableData.meta.research_payload.campaign_brief) {
-            console.log('   Meta campaign_brief keys:', Object.keys(campaignTableData.meta.research_payload.campaign_brief));
-            console.log('   Meta campaign_brief.title:', campaignTableData.meta.research_payload.campaign_brief.title || 'NOT FOUND');
-            console.log('   Meta campaign_brief.objective:', campaignTableData.meta.research_payload.campaign_brief.objective ? campaignTableData.meta.research_payload.campaign_brief.objective.substring(0, 50) + '...' : 'NOT FOUND');
-          }
-        }
-        console.log('   Meta origin_raw_admin_notes:', campaignTableData.meta.origin_raw_admin_notes ? campaignTableData.meta.origin_raw_admin_notes.substring(0, 50) + '...' : 'NOT FOUND');
-      }
-      console.log('   Has matchmaker_strategy:', !!campaignTableData.matchmaker_strategy);
-      if (campaignTableData.matchmaker_strategy) {
-        console.log('   Matchmaker_strategy type:', typeof campaignTableData.matchmaker_strategy);
-        console.log('   Matchmaker_strategy keys:', Object.keys(campaignTableData.matchmaker_strategy));
-        console.log('   Matchmaker_strategy.tags:', campaignTableData.matchmaker_strategy.tags);
-        console.log('   Matchmaker_strategy.tags type:', typeof campaignTableData.matchmaker_strategy.tags);
-        console.log('   Matchmaker_strategy.tags is array:', Array.isArray(campaignTableData.matchmaker_strategy.tags));
-      }
-      
-      // Extract from meta FIRST (most reliable source)
-      const meta = campaignTableData.meta || {};
-      const researchPayload = meta.research_payload || {};
-      const campaignBrief = researchPayload.campaign_brief || {};
-      
-      // Get title from meta.campaign_brief.title FIRST, then fallback to campaign.name
-      if (campaignBrief && campaignBrief.title) {
-        campaignName = campaignBrief.title;
-        console.log('   ✅ Title from meta.campaign_brief.title:', campaignName);
-      } else if (campaignTableData.name) {
-        campaignName = campaignTableData.name;
-        console.log('   ✅ Title from campaign.name:', campaignName);
-      } else {
-        console.log('   ⚠️ No title found in meta or campaign.name');
-      }
-      
-      // Get objective from meta.campaign_brief.objective FIRST, then fallback to campaign.objective
-      if (campaignBrief && campaignBrief.objective) {
-        campaignObjective = campaignBrief.objective;
-        console.log('   ✅ Objective from meta.campaign_brief.objective');
-      } else if (campaignTableData.objective) {
-        campaignObjective = campaignTableData.objective;
-        console.log('   ✅ Objective from campaign.objective');
-      } else {
-        console.log('   ⚠️ No objective found');
-      }
-      
-      // Get other fields
-      campaignCreatedAt = campaignTableData.created_at || campaignCreatedAt;
-      campaignUpdatedAt = campaignTableData.updated_at || campaignUpdatedAt;
-      
-      // Get origin notes
-      originNotes = meta.origin_raw_admin_notes || '';
-      console.log('   Origin Notes:', originNotes ? originNotes.substring(0, 50) + '...' : 'NOT FOUND');
-      
-      // Get total matched audience
-      const matchmakerResult = meta.matchmaker_result || {};
-      totalMatchedAudience = matchmakerResult.total_matched || 0;
-      console.log('   Total Matched:', totalMatchedAudience);
-      
-      // Get tags from matchmaker_strategy FIRST (most reliable), then meta
-      if (campaignTableData.matchmaker_strategy) {
-        if (Array.isArray(campaignTableData.matchmaker_strategy.tags)) {
-          campaignTags = campaignTableData.matchmaker_strategy.tags;
-          console.log('   ✅ Tags from matchmaker_strategy.tags:', campaignTags.length, 'tags');
-        } else {
-          console.log('   ⚠️ matchmaker_strategy.tags is not an array:', typeof campaignTableData.matchmaker_strategy.tags);
-        }
-      }
-      
-      // Fallback to meta tags if matchmaker_strategy doesn't have tags
-      if (campaignTags.length === 0 && campaignBrief && Array.isArray(campaignBrief.tags)) {
-        campaignTags = campaignBrief.tags;
-        console.log('   ✅ Tags from meta.campaign_brief.tags:', campaignTags.length, 'tags');
-      }
-      
-      if (campaignTags.length === 0) {
-        console.log('   ⚠️ No tags found in matchmaker_strategy or meta');
-      }
-      
-      console.log('✅ Final campaign data:', {
-        name: campaignName,
-        objective: campaignObjective ? campaignObjective.substring(0, 30) + '...' : 'MISSING',
-        originNotes: originNotes ? 'EXISTS' : 'MISSING',
-        tags: campaignTags.length,
-        totalMatched: totalMatchedAudience,
-      });
-    } else {
-      console.log('⚠️ Campaign table data is null');
+    if (fullCampaign.matchmaker_strategy?.tags && Array.isArray(fullCampaign.matchmaker_strategy.tags)) {
+      campaignTags = fullCampaign.matchmaker_strategy.tags;
+    } else if (campaignBrief.tags && Array.isArray(campaignBrief.tags)) {
+      campaignTags = campaignBrief.tags;
     }
 
-    // Get campaign audiences with broadcast_content
-    console.log('🔍 Fetching campaign audiences with broadcast_content...');
-    console.log('   Campaign ID:', latestDraftCampaignId);
-    console.log('   Timestamp:', new Date().toISOString());
+    console.log(`✅ [GET /api/drafts] Campaign info extracted:`);
+    console.log(`   Name: ${campaignName}`);
+    console.log(`   Tags: ${campaignTags.length}`);
+
+    // STEP 3: Get campaign audiences with broadcast_content
+    console.log(`🔍 [GET /api/drafts] STEP 3: Fetching audiences with broadcast_content...`);
     
-    // Create a fresh client instance to bypass any potential caching
-    const fetchSupabase = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-      db: {
-        schema: 'citia_mora_datamart',
-      },
-    });
-    
-    // First, let's check ALL rows for this campaign (including NULL/empty broadcast_content)
-    console.log('🔍 Checking ALL campaign_audience rows for this campaign (including NULL)...');
-    const { data: allRows, error: allRowsError } = await fetchSupabase
+    const { data: audienceData, error: audienceError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign_audience')
-      .select('id, audience_id, broadcast_content, updated_at, created_at')
-      .eq('campaign_id', latestDraftCampaignId)
-      .order('updated_at', { ascending: false }); // Order by updated_at DESC to see latest first
-    
-    if (!allRowsError && allRows) {
-      console.log(`   Found ${allRows.length} total rows for this campaign:`);
-      allRows.forEach((row, idx) => {
-        console.log(`   Row ${idx + 1}:`, {
-          id: row.id,
-          audience_id: row.audience_id,
-          content_preview: row.broadcast_content?.substring(0, 50) || 'NULL/EMPTY',
-          content_length: row.broadcast_content?.length || 0,
-          updated_at: row.updated_at,
-          created_at: row.created_at,
-        });
-      });
-      
-      // Group by audience_id and find the latest one for each
-      const latestByAudience = new Map();
-      allRows.forEach((row) => {
-        const existing = latestByAudience.get(row.audience_id);
-        if (!existing || new Date(row.updated_at) > new Date(existing.updated_at)) {
-          latestByAudience.set(row.audience_id, row);
-        }
-      });
-      
-      console.log(`   Latest row per audience_id (from all rows):`);
-      latestByAudience.forEach((row, audienceId) => {
-        console.log(`   Audience ${audienceId}:`, {
-          id: row.id,
-          content_preview: row.broadcast_content?.substring(0, 50) || 'NULL/EMPTY',
-          updated_at: row.updated_at,
-        });
-      });
-    }
-    
-    // Now fetch with proper filtering - get rows with broadcast_content
-    // Then we'll deduplicate to get only the latest per audience_id
-    console.log('🔍 Fetching rows with broadcast_content...');
-    const { data: audienceData, error: audienceError } = await fetchSupabase
-      .schema('citia_mora_datamart')
-      .from('campaign_audience')
-      .select(`
-        id,
-        campaign_id,
-        audience_id,
-        broadcast_content,
-        meta,
-        target_status,
-        created_at,
-        updated_at
-      `)
+      .select('id, campaign_id, audience_id, broadcast_content, meta, target_status, created_at, updated_at')
       .eq('campaign_id', latestDraftCampaignId)
       .not('broadcast_content', 'is', null)
       .neq('broadcast_content', '')
-      .order('updated_at', { ascending: false }); // Order by updated_at DESC to get latest first
+      .order('updated_at', { ascending: false });
 
     if (audienceError) {
-      console.error('❌ Error fetching campaign audiences:', audienceError);
-      console.error('   Error code:', audienceError.code);
-      console.error('   Error message:', audienceError.message);
-    } else {
-      console.log('✅ Fetched', audienceData?.length || 0, 'rows with broadcast_content');
-      if (audienceData && audienceData.length > 0) {
-        console.log('   Raw fetched data (before deduplication):');
-        audienceData.forEach((aud, idx) => {
-          console.log(`   Raw ${idx + 1}:`, {
-            id: aud.id,
-            audience_id: aud.audience_id,
-            content_preview: aud.broadcast_content?.substring(0, 50) || 'EMPTY',
-            content_length: aud.broadcast_content?.length || 0,
-            updated_at: aud.updated_at,
-          });
-        });
-        
-        // Group by audience_id and take only the latest one (highest updated_at)
-        const latestByAudience = new Map();
-        audienceData.forEach((aud) => {
-          const existing = latestByAudience.get(aud.audience_id);
-          const audDate = new Date(aud.updated_at);
-          const existingDate = existing ? new Date(existing.updated_at) : null;
-          
-          if (!existing || (existingDate && audDate > existingDate)) {
-            console.log(`   ✅ Selecting row ${aud.id} for audience ${aud.audience_id} (updated_at: ${aud.updated_at})`);
-            if (existing) {
-              console.log(`      Replacing row ${existing.id} (updated_at: ${existing.updated_at})`);
-            }
-            latestByAudience.set(aud.audience_id, aud);
-          } else {
-            console.log(`   ⏭️  Skipping row ${aud.id} for audience ${aud.audience_id} (older than existing)`);
-          }
-        });
-        
-        const deduplicatedData = Array.from(latestByAudience.values());
-        console.log(`   After deduplication: ${deduplicatedData.length} unique audiences`);
-        
-        deduplicatedData.forEach((aud, idx) => {
-          console.log(`   Audience ${idx + 1} (FINAL SELECTED):`, {
-            id: aud.id,
-            audience_id: aud.audience_id,
-            content_preview: aud.broadcast_content?.substring(0, 50) || 'EMPTY',
-            content_length: aud.broadcast_content?.length || 0,
-            updated_at: aud.updated_at,
-          });
-        });
-        
-        // Use deduplicated data
-        const originalLength = audienceData.length;
-        audienceData.length = 0;
-        audienceData.push(...deduplicatedData);
-        
-        if (originalLength !== deduplicatedData.length) {
-          console.log(`   ⚠️ Removed ${originalLength - deduplicatedData.length} duplicate rows`);
-        }
-      }
-    }
-
-    if (audienceError) {
-      console.error('❌ Error fetching audiences:', audienceError);
-      console.error('❌ Error code:', audienceError.code);
-      console.error('❌ Error message:', audienceError.message);
-      console.log('⚠️ Cannot access campaign_audience table (expected due to permissions)');
-      console.log('⚠️ Please run grant-supabase-permissions.sql to grant SELECT permission');
-      
-      // Return minimal data with campaign_id at least
-      return NextResponse.json({
+      console.error(`❌ [GET /api/drafts] Error fetching audiences:`, audienceError.message);
+      return createResponse({
         draft: {
           campaign_id: latestDraftCampaignId,
           campaign_name: campaignName,
           campaign_objective: campaignObjective,
-          audiences: [], // Empty array if we can't access campaign_audience
-          created_at: campaignCreatedAt,
-          updated_at: campaignUpdatedAt,
+          campaign_tags: campaignTags,
+          origin_notes: originNotes,
+          total_matched_audience: 0,
+          audiences: [],
+          created_at: fullCampaign.created_at,
+          updated_at: fullCampaign.updated_at,
         },
         campaign_id: latestDraftCampaignId,
-        warning: 'Could not fetch audiences due to permission error. Please run grant-supabase-permissions.sql to grant SELECT permission on campaign_audience and audience tables.',
+        warning: 'Could not fetch audiences',
       });
     }
 
-    console.log('✅ Found', audienceData?.length || 0, 'audiences with broadcast_content');
+    console.log(`✅ [GET /api/drafts] Found ${audienceData?.length || 0} audience rows`);
 
-    // Get audience details separately
-    const audienceIds = (audienceData || []).map((item: any) => item.audience_id);
-    
+    // Deduplicate by audience_id (keep latest)
+    const latestByAudience = new Map();
+    (audienceData || []).forEach((aud) => {
+      const existing = latestByAudience.get(aud.audience_id);
+      if (!existing || new Date(aud.updated_at) > new Date(existing.updated_at)) {
+        latestByAudience.set(aud.audience_id, aud);
+      }
+    });
+    const deduplicatedData = Array.from(latestByAudience.values());
+    console.log(`✅ [GET /api/drafts] After deduplication: ${deduplicatedData.length} unique audiences`);
+
+    // STEP 4: Get audience details
+    const audienceIds = deduplicatedData.map((item) => item.audience_id);
     let audienceDetails: any[] = [];
+    
     if (audienceIds.length > 0) {
-      console.log('🔍 Fetching audience details for', audienceIds.length, 'audiences...');
       const { data: detailsData, error: detailsError } = await supabase
         .schema('citia_mora_datamart')
         .from('audience')
         .select('id, full_name, source_contact_id, wa_opt_in, telegram_username, phone_e164')
         .in('id', audienceIds);
 
-      if (detailsError) {
-        console.error('❌ Error fetching audience details:', detailsError);
-        console.log('⚠️ Will use minimal audience data from campaign_audience');
-      } else if (detailsData) {
+      if (!detailsError && detailsData) {
         audienceDetails = detailsData;
-        console.log('✅ Fetched', audienceDetails.length, 'audience details');
       }
     }
-    
-    // Update total matched audience if we have actual count
-    if (totalMatchedAudience === 0 && audienceData && audienceData.length > 0) {
-      totalMatchedAudience = audienceData.length;
+
+    // Update total matched audience
+    if (totalMatchedAudience === 0 && deduplicatedData.length > 0) {
+      totalMatchedAudience = deduplicatedData.length;
     }
 
-    // Combine data
-    const audiences = (audienceData || []).map((item: any) => {
-      const audienceDetail = audienceDetails.find((a: any) => a.id === item.audience_id) || {};
+    // Map audiences
+    const audiences = deduplicatedData.map((item) => {
+      const detail = audienceDetails.find((a) => a.id === item.audience_id) || {};
       const meta = item.meta || {};
       const guardrails = meta.guardrails || {};
-      
-      // Determine channel based on wa_opt_in and telegram_username
-      // If wa_opt_in is true, it's WhatsApp
-      // If telegram_username exists and wa_opt_in is not true, it's Telegram
-      const isWhatsApp = audienceDetail.wa_opt_in === true;
-      const isTelegram = !isWhatsApp && !!audienceDetail.telegram_username;
-      const channel = isWhatsApp ? 'whatsapp' : isTelegram ? 'telegram' : 'whatsapp'; // Default to whatsapp
-      
-      // Determine "send to" value based on channel
-      // For WhatsApp: use phone_e164 FIRST (proper phone number), then fallback to source_contact_id
-      // For Telegram: use telegram_username with @ prefix, or source_contact_id
+
+      const isWhatsApp = detail.wa_opt_in === true;
+      const isTelegram = !isWhatsApp && !!detail.telegram_username;
+      const channel = isWhatsApp ? 'whatsapp' : isTelegram ? 'telegram' : 'whatsapp';
+
       let sendTo = '';
       if (channel === 'whatsapp') {
-        // Prefer phone_e164 (format: +628xxx) for WhatsApp
-        if (audienceDetail.phone_e164) {
-          sendTo = audienceDetail.phone_e164;
-        } else if (audienceDetail.source_contact_id && audienceDetail.source_contact_id.startsWith('wa-')) {
-          // Fallback: extract from source_contact_id format "wa-628xxx"
-          sendTo = audienceDetail.source_contact_id.substring(3); // Remove "wa-" prefix
-        } else {
-          sendTo = audienceDetail.source_contact_id || '';
-        }
+        sendTo = detail.phone_e164 || detail.source_contact_id || '';
       } else if (channel === 'telegram') {
-        // Prefer telegram_username with @ prefix, fallback to source_contact_id
-        if (audienceDetail.telegram_username) {
-          sendTo = audienceDetail.telegram_username.startsWith('@') 
-            ? audienceDetail.telegram_username 
-            : '@' + audienceDetail.telegram_username;
-        } else {
-          sendTo = audienceDetail.source_contact_id || '';
-        }
-      } else {
-        sendTo = audienceDetail.source_contact_id || '';
+        sendTo = detail.telegram_username 
+          ? (detail.telegram_username.startsWith('@') ? detail.telegram_username : '@' + detail.telegram_username)
+          : detail.source_contact_id || '';
       }
-      
-      console.log('   Audience:', audienceDetail.full_name || 'Unknown', '- Channel:', channel, '- Send To:', sendTo, '- Phone E164:', audienceDetail.phone_e164 || 'N/A');
 
-      // Map guardrails tag: 'approved' -> 'passed'
       let guardrailsTag = guardrails.tag || 'needs_review';
-      if (guardrailsTag === 'approved') {
-        guardrailsTag = 'passed';
-      }
+      if (guardrailsTag === 'approved') guardrailsTag = 'passed';
 
-      const audienceResult = {
+      return {
         campaign_id: item.campaign_id,
         audience_id: item.audience_id,
-        audience_name: audienceDetail.full_name || audienceDetail.source_contact_id || 'Unknown',
-        source_contact_id: audienceDetail.source_contact_id || '',
-        telegram_username: audienceDetail.telegram_username || '',
-        send_to: sendTo || audienceDetail.source_contact_id || 'Unknown',
-        channel: channel,
+        audience_name: detail.full_name || detail.source_contact_id || 'Unknown',
+        source_contact_id: detail.source_contact_id || '',
+        telegram_username: detail.telegram_username || '',
+        send_to: sendTo || 'Unknown',
+        channel,
         broadcast_content: item.broadcast_content || '',
-        character_count: item.broadcast_content ? item.broadcast_content.length : 0,
+        character_count: item.broadcast_content?.length || 0,
         guardrails_tag: guardrailsTag,
-        guardrails_status: guardrails.status || 'approved',
         guardrails_violations: guardrails.violations || [],
         matchmaker_reason: meta.matchmaker_reason,
         target_status: item.target_status || 'pending',
         created_at: item.created_at,
         updated_at: item.updated_at,
       };
-      
-      // Log broadcast_content for debugging
-      console.log(`   📝 Audience ${audienceResult.audience_name} (${audienceResult.audience_id}):`);
-      console.log(`      Content preview: ${audienceResult.broadcast_content?.substring(0, 80) || 'EMPTY'}`);
-      console.log(`      Content length: ${audienceResult.broadcast_content?.length || 0}`);
-      console.log(`      Updated at: ${audienceResult.updated_at}`);
-      
-      return audienceResult;
     });
 
-    console.log('✅ Returning draft data with', audiences.length, 'audiences');
-    console.log('📤 Final response data:', {
-      campaign_id: latestDraftCampaignId,
-      campaign_name: campaignName,
-      campaign_objective: campaignObjective ? campaignObjective.substring(0, 30) + '...' : 'MISSING',
-      campaign_objective_length: campaignObjective ? campaignObjective.length : 0,
-      origin_notes: originNotes ? originNotes.substring(0, 30) + '...' : 'MISSING',
-      origin_notes_length: originNotes ? originNotes.length : 0,
-      tags_count: campaignTags.length,
-      tags: campaignTags,
-      total_matched_audience: totalMatchedAudience,
-      audiences_count: audiences.length,
-    });
-    
-    return NextResponse.json({
+    console.log(`✅ [GET /api/drafts] Returning ${audiences.length} audiences`);
+    console.log(`🔍 [GET /api/drafts] ==========================================\n`);
+
+    return createResponse({
       draft: {
         campaign_id: latestDraftCampaignId,
         campaign_name: campaignName,
@@ -599,16 +242,31 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         origin_notes: originNotes,
         total_matched_audience: totalMatchedAudience,
         audiences,
-        created_at: campaignCreatedAt,
-        updated_at: campaignUpdatedAt,
+        created_at: fullCampaign.created_at,
+        updated_at: fullCampaign.updated_at,
       },
-      campaign_id: latestDraftCampaignId, // Also return campaign_id for easier access
+      campaign_id: latestDraftCampaignId,
     });
   } catch (error) {
-    console.error('Error in GET /api/drafts:', error);
-    return NextResponse.json(
+    console.error('❌ [GET /api/drafts] Error:', error);
+    return createResponse(
       { error: 'Internal server error' },
-      { status: 500 }
+      500
     );
   }
+}
+
+/**
+ * Create response with no-cache headers
+ */
+function createResponse(data: any, status: number = 200): NextResponse {
+  const response = NextResponse.json(data, { status });
+  
+  // Add headers to prevent ALL caching
+  response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  response.headers.set('Pragma', 'no-cache');
+  response.headers.set('Expires', '0');
+  response.headers.set('Surrogate-Control', 'no-store');
+  
+  return response;
 }

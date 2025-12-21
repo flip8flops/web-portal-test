@@ -2,48 +2,72 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL!;
-// Use anon key (same as other endpoints) to match permissions
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY!;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error('❌ Missing Supabase configuration');
 }
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
-
 /**
  * POST /api/drafts/reject
- * Reject draft campaign
+ * Reject draft campaign - updates campaign.status to 'rejected'
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  // Create FRESH client for each request
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+
   try {
     const body = await request.json();
     const { campaign_id } = body;
 
-    console.log('🚫 POST /api/drafts/reject - Starting...');
-    console.log('   Campaign ID:', campaign_id);
+    console.log(`\n🚫 [POST /api/drafts/reject] ==========================================`);
+    console.log(`🚫 [POST /api/drafts/reject] Campaign ID: ${campaign_id}`);
 
     if (!campaign_id) {
       console.error('❌ Missing campaign_id');
-      return NextResponse.json(
-        { error: 'campaign_id is required' },
-        { status: 400 }
-      );
+      return createResponse({ error: 'campaign_id is required' }, 400);
     }
 
     const rejectTimestamp = new Date().toISOString();
-    console.log('   Reject timestamp:', rejectTimestamp);
+    console.log(`   Timestamp: ${rejectTimestamp}`);
 
-    // Step 1: Insert status update: campaign rejected
-    console.log('📝 Step 1: Inserting reject status to campaign_status_updates...');
-    const { data: statusData, error: statusError } = await supabase
+    // Step 1: Update campaign.status to 'rejected' FIRST (source of truth)
+    console.log('📝 Step 1: Updating campaign.status to rejected...');
+    const { data: campaignData, error: campaignError } = await supabase
+      .schema('citia_mora_datamart')
+      .from('campaign')
+      .update({
+        status: 'rejected',
+        updated_at: rejectTimestamp,
+      })
+      .eq('id', campaign_id)
+      .select('id, status, updated_at');
+
+    if (campaignError) {
+      console.error('❌ Error updating campaign:', campaignError.message);
+      return createResponse({
+        error: 'Failed to update campaign status',
+        details: campaignError.message,
+      }, 500);
+    }
+
+    if (campaignData && campaignData.length > 0) {
+      console.log('✅ Campaign updated:', campaignData[0]);
+    } else {
+      console.warn('⚠️ No campaign found with ID:', campaign_id);
+    }
+
+    // Step 2: Insert status update record
+    console.log('📝 Step 2: Inserting status update...');
+    const { error: statusError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign_status_updates')
       .insert({
@@ -57,95 +81,54 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           rejected_at: rejectTimestamp,
           rejected_by: 'admin',
         },
-      })
-      .select('id, campaign_id, agent_name, status, message');
+      });
 
     if (statusError) {
-      console.error('❌ Error inserting reject status:', statusError);
-      console.error('   Error code:', statusError.code);
-      console.error('   Error message:', statusError.message);
-      console.error('   Error details:', statusError.details);
-      return NextResponse.json(
-        { error: 'Failed to update campaign status', details: statusError.message },
-        { status: 500 }
-      );
-    }
-
-    if (statusData && statusData.length > 0) {
-      console.log('✅ Status update inserted successfully:', statusData[0]);
+      console.error('❌ Error inserting status update:', statusError.message);
+      // Continue anyway - campaign.status is already updated
     } else {
-      console.warn('⚠️ Status update returned no data');
+      console.log('✅ Status update inserted');
     }
 
-    // Step 2: Update campaign status to rejected
-    console.log('📝 Step 2: Updating campaign.status to rejected...');
-    const { data: campaignUpdateData, error: campaignUpdateError } = await supabase
-      .schema('citia_mora_datamart')
-      .from('campaign')
-      .update({
-        status: 'rejected',
-        updated_at: rejectTimestamp,
-      })
-      .eq('id', campaign_id)
-      .select('id, status, updated_at');
-
-    if (campaignUpdateError) {
-      console.error('❌ Error updating campaign status:', campaignUpdateError);
-      console.error('   Error code:', campaignUpdateError.code);
-      console.error('   Error message:', campaignUpdateError.message);
-      console.error('   Error details:', campaignUpdateError.details);
-      console.warn('⚠️ Continuing despite campaign update error (status update is more important)');
-    } else {
-      if (campaignUpdateData && campaignUpdateData.length > 0) {
-        console.log('✅ Campaign status updated successfully:', campaignUpdateData[0]);
-      } else {
-        console.warn('⚠️ Campaign update returned no data (might indicate no rows matched)');
-      }
-    }
-
-    // Step 3: Update all campaign_audience records to rejected
-    console.log('📝 Step 3: Updating campaign_audience.target_status to rejected...');
-    const { data: audienceUpdateData, error: updateError } = await supabase
+    // Step 3: Update campaign_audience records
+    console.log('📝 Step 3: Updating audience records...');
+    const { data: audienceData, error: audienceError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign_audience')
       .update({
         target_status: 'rejected',
-        meta: {
-          rejection: {
-            rejected_at: rejectTimestamp,
-            rejected_by: 'admin',
-          },
-        },
         updated_at: rejectTimestamp,
       })
       .eq('campaign_id', campaign_id)
-      .select('id, campaign_id, target_status');
+      .select('id');
 
-    if (updateError) {
-      console.error('❌ Error updating audience status:', updateError);
-      console.error('   Error code:', updateError.code);
-      console.error('   Error message:', updateError.message);
-      console.warn('⚠️ Continuing despite audience update error (status update is more important)');
+    if (audienceError) {
+      console.error('❌ Error updating audiences:', audienceError.message);
+      // Continue anyway
     } else {
-      if (audienceUpdateData) {
-        console.log(`✅ Updated ${audienceUpdateData.length} audience record(s) to rejected`);
-      } else {
-        console.warn('⚠️ Audience update returned no data');
-      }
+      console.log(`✅ Updated ${audienceData?.length || 0} audience records`);
     }
 
-    console.log('✅ Campaign rejected successfully');
-    return NextResponse.json({
+    console.log(`✅ [POST /api/drafts/reject] Campaign rejected successfully`);
+    console.log(`🚫 [POST /api/drafts/reject] ==========================================\n`);
+
+    return createResponse({
       success: true,
       message: 'Campaign rejected successfully',
+      campaign_id,
     });
   } catch (error: any) {
-    console.error('❌ Error in POST /api/drafts/reject:', error);
-    console.error('   Error type:', error?.constructor?.name);
-    console.error('   Error message:', error?.message);
-    return NextResponse.json(
-      { error: 'Internal server error', details: error?.message },
-      { status: 500 }
-    );
+    console.error('❌ Error:', error);
+    return createResponse({
+      error: 'Internal server error',
+      details: error?.message,
+    }, 500);
   }
+}
+
+function createResponse(data: any, status: number = 200): NextResponse {
+  const response = NextResponse.json(data, { status });
+  response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  response.headers.set('Pragma', 'no-cache');
+  return response;
 }
