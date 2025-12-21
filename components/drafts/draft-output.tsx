@@ -604,18 +604,19 @@ export function DraftOutput() {
                     )}
                   </div>
 
-                  {/* Message Bubble with Image Header (like WhatsApp/Telegram) */}
-                  <div className="bg-blue-50 dark:bg-blue-950 rounded-lg overflow-hidden border border-blue-200 dark:border-blue-800">
-                    {/* Image Header if available - full image, no cropping */}
-                    {draft.campaign_image_url && (
-                      <div className="w-full border-b border-blue-200 dark:border-blue-800">
-                        <img
-                          src={draft.campaign_image_url}
-                          alt="Campaign image"
-                          className="w-full h-auto object-contain"
-                        />
-                      </div>
-                    )}
+                  {/* Message Bubble with Image Header (like WhatsApp/Telegram incoming message) */}
+                  <div className="w-2/3">
+                    <div className="bg-blue-50 dark:bg-blue-950 rounded-lg rounded-tl-none overflow-hidden border border-blue-200 dark:border-blue-800 shadow-sm">
+                      {/* Image Header if available - full image, no cropping */}
+                      {draft.campaign_image_url && (
+                        <div className="w-full border-b border-blue-200 dark:border-blue-800">
+                          <img
+                            src={draft.campaign_image_url}
+                            alt="Campaign image"
+                            className="w-full h-auto object-contain"
+                          />
+                        </div>
+                      )}
                     
                     {/* Text Content */}
                     <div className="p-4">
@@ -642,6 +643,7 @@ export function DraftOutput() {
                         </>
                       )}
                     </div>
+                  </div>
                   </div>
                 </div>
               </div>
