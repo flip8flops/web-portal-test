@@ -124,6 +124,45 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     console.log(`   Name: ${campaignName}`);
     console.log(`   Tags: ${campaignTags.length}`);
 
+    // STEP 2.5: Get campaign image from campaign_asset and asset tables
+    console.log(`🔍 [GET /api/drafts] STEP 2.5: Fetching campaign image asset...`);
+    
+    let campaignImageUrl: string | null = null;
+    
+    // First get campaign_asset entries
+    const { data: campaignAssets, error: caError } = await supabase
+      .schema('citia_mora_datamart')
+      .from('campaign_asset')
+      .select('asset_id')
+      .eq('campaign_id', latestDraftCampaignId);
+    
+    if (!caError && campaignAssets && campaignAssets.length > 0) {
+      const assetIds = campaignAssets.map((ca: any) => ca.asset_id);
+      
+      // Get assets and filter for images
+      const { data: assets, error: assetError } = await supabase
+        .schema('citia_mora_datamart')
+        .from('asset')
+        .select('id, type, media_url, usage_type')
+        .in('id', assetIds)
+        .eq('type', 'image');
+      
+      if (!assetError && assets && assets.length > 0) {
+        // Prefer primary_visual, otherwise take first image
+        const primaryImage = assets.find((a: any) => a.usage_type === 'primary_visual');
+        const imageAsset = primaryImage || assets[0];
+        
+        if (imageAsset && imageAsset.media_url) {
+          campaignImageUrl = imageAsset.media_url;
+          console.log(`✅ [GET /api/drafts] Found campaign image: ${imageAsset.media_url.substring(0, 80)}...`);
+        }
+      }
+    }
+    
+    if (!campaignImageUrl) {
+      console.log(`ℹ️ [GET /api/drafts] No image asset found for this campaign`);
+    }
+
     // STEP 3: Get campaign audiences with broadcast_content
     console.log(`🔍 [GET /api/drafts] STEP 3: Fetching audiences with broadcast_content...`);
     
@@ -231,6 +270,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
 
     console.log(`✅ [GET /api/drafts] Returning ${audiences.length} audiences`);
+    console.log(`   Image URL: ${campaignImageUrl ? 'Yes' : 'No'}`);
     console.log(`🔍 [GET /api/drafts] ==========================================\n`);
 
     return createResponse({
@@ -238,6 +278,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         campaign_id: latestDraftCampaignId,
         campaign_name: campaignName,
         campaign_objective: campaignObjective,
+        campaign_image_url: campaignImageUrl,
         campaign_tags: campaignTags,
         origin_notes: originNotes,
         total_matched_audience: totalMatchedAudience,

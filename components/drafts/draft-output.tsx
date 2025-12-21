@@ -604,41 +604,44 @@ export function DraftOutput() {
                     )}
                   </div>
 
-                  {/* Image if available */}
-                  {draft.campaign_image_url && (
-                    <div className="relative w-full h-48 rounded-lg overflow-hidden mb-2 border border-gray-200 dark:border-gray-700">
-                      <img
-                        src={draft.campaign_image_url}
-                        alt="Campaign image"
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  )}
-
-                  {/* Message Bubble */}
-                  <div className="bg-blue-50 dark:bg-blue-950 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
-                    {editingContent === selectedAudienceDetail.audience_id ? (
-                      <>
-                        <textarea
-                          value={editedContent}
-                          onChange={(e) => setEditedContent(e.target.value)}
-                          className="w-full min-h-[100px] p-2 border rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Edit message content..."
+                  {/* Message Bubble with Image Header (like WhatsApp/Telegram) */}
+                  <div className="bg-blue-50 dark:bg-blue-950 rounded-lg overflow-hidden border border-blue-200 dark:border-blue-800">
+                    {/* Image Header if available */}
+                    {draft.campaign_image_url && (
+                      <div className="relative w-full h-48 border-b border-blue-200 dark:border-blue-800">
+                        <img
+                          src={draft.campaign_image_url}
+                          alt="Campaign image"
+                          className="w-full h-full object-cover"
                         />
-                        <p className="text-xs text-gray-500 mt-2">
-                          {editedContent.length} characters
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-sm whitespace-pre-wrap">
-                          {selectedAudienceDetail.broadcast_content}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-2">
-                          {selectedAudienceDetail.character_count} characters
-                        </p>
-                      </>
+                      </div>
                     )}
+                    
+                    {/* Text Content */}
+                    <div className="p-4">
+                      {editingContent === selectedAudienceDetail.audience_id ? (
+                        <>
+                          <textarea
+                            value={editedContent}
+                            onChange={(e) => setEditedContent(e.target.value)}
+                            className="w-full min-h-[100px] p-2 border rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Edit message content..."
+                          />
+                          <p className="text-xs text-gray-500 mt-2">
+                            {editedContent.length} characters
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm whitespace-pre-wrap">
+                            {selectedAudienceDetail.broadcast_content}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-2">
+                            {selectedAudienceDetail.character_count} characters
+                          </p>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
