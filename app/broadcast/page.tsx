@@ -41,6 +41,17 @@ export default function BroadcastPage() {
 
   // ===== TAB STATE =====
   const [activeTab, setActiveTab] = useState('input');
+  const [showOutputTab, setShowOutputTab] = useState(false);
+
+  // ===== TITLE DOUBLE-CLICK HANDLER =====
+  const handleTitleDoubleClick = () => {
+    setShowOutputTab(prev => !prev);
+    // If hiding output tab and currently on output, switch to input
+    if (showOutputTab && activeTab === 'output') {
+      setActiveTab('input');
+    }
+    console.log('🔄 [Broadcast] Output tab visibility toggled:', !showOutputTab);
+  };
 
   // ===== SESSION INITIALIZATION =====
   useEffect(() => {
@@ -262,7 +273,12 @@ export default function BroadcastPage() {
   return (
     <div className="space-y-8">
       <div className="mb-6 pb-2">
-        <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2 leading-tight pt-1 pb-1">
+        <h1 
+          className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2 leading-tight pt-1 pb-1"
+          onDoubleClick={handleTitleDoubleClick}
+          style={{ cursor: 'default', userSelect: 'none' }}
+          title="Double-click untuk toggle Output tab"
+        >
           Broadcast Team Agent
         </h1>
         <p className="text-gray-600 text-lg">Create and manage broadcast campaigns</p>
@@ -270,19 +286,21 @@ export default function BroadcastPage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-2 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm">
+        <TabsList className={`grid w-full max-w-md bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm ${showOutputTab ? 'grid-cols-2' : 'grid-cols-1'}`}>
           <TabsTrigger 
             value="input"
             className="data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm dark:data-[state=active]:bg-gray-900 dark:data-[state=active]:text-blue-400 font-medium"
           >
             Input
           </TabsTrigger>
-          <TabsTrigger 
-            value="output"
-            className="data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm dark:data-[state=active]:bg-gray-900 dark:data-[state=active]:text-blue-400 font-medium"
-          >
-            Output
-          </TabsTrigger>
+          {showOutputTab && (
+            <TabsTrigger 
+              value="output"
+              className="data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm dark:data-[state=active]:bg-gray-900 dark:data-[state=active]:text-blue-400 font-medium"
+            >
+              Output
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* ===== INPUT TAB ===== */}
@@ -341,10 +359,12 @@ export default function BroadcastPage() {
           </form>
         </TabsContent>
 
-        {/* ===== OUTPUT TAB (Independent) ===== */}
-        <TabsContent value="output" className="space-y-6">
-          <DraftOutput />
-        </TabsContent>
+        {/* ===== OUTPUT TAB (Independent, Hidden by Default) ===== */}
+        {showOutputTab && (
+          <TabsContent value="output" className="space-y-6">
+            <DraftOutput />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

@@ -4,7 +4,8 @@ import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/src/lib/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, CheckCircle2, XCircle, Ban, AlertCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Loader2, CheckCircle2, XCircle, Ban, AlertCircle, Upload } from 'lucide-react';
 
 interface StatusUpdate {
   agent_name: string;
@@ -51,10 +52,51 @@ const statusColors: Record<string, string> = {
 export function StatusDisplay({ campaignId, executionId, onProcessingChange }: StatusDisplayProps) {
   const [statuses, setStatuses] = useState<Record<string, StatusUpdate>>({});
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const currentIdsRef = useRef<{ campaignId: string | null; executionId: string | null | undefined }>({
     campaignId: null,
     executionId: null,
   });
+
+  // Handle sync to Citia
+  const handleSync = async () => {
+    if (!campaignId || syncing) return;
+    
+    setSyncing(true);
+    setSyncMessage(null);
+    
+    try {
+      console.log('📤 [StatusDisplay] Triggering sync for campaign:', campaignId);
+      
+      const response = await fetch('/api/broadcast/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaign_id: campaignId }),
+      });
+      
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'Sync failed');
+      }
+      
+      console.log('✅ [StatusDisplay] Sync succeeded:', result);
+      setSyncMessage({ type: 'success', text: 'Sync berhasil! Data telah dikirim ke Citia.' });
+      
+      // Clear success message after 5 seconds
+      setTimeout(() => setSyncMessage(null), 5000);
+      
+    } catch (error) {
+      console.error('❌ [StatusDisplay] Sync error:', error);
+      setSyncMessage({ 
+        type: 'error', 
+        text: error instanceof Error ? error.message : 'Sync gagal. Silakan coba lagi.' 
+      });
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // Notify parent when processing status changes
   useEffect(() => {
@@ -444,6 +486,50 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
             );
           })}
           </div>
+          
+          {/* SYNC Button - Only show when Guardrails Out is completed */}
+          {statuses['guardrails_qc']?.status === 'completed' && (
+            <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Sync ke Citia Database
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Kirim hasil draft ke database Citia untuk review & blast
+                  </p>
+                </div>
+                <Button
+                  onClick={handleSync}
+                  disabled={syncing}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  {syncing ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Syncing...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4 mr-2" />
+                      SYNC
+                    </>
+                  )}
+                </Button>
+              </div>
+              
+              {/* Sync Message */}
+              {syncMessage && (
+                <div className={`mt-3 p-3 rounded-md text-sm ${
+                  syncMessage.type === 'success' 
+                    ? 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300' 
+                    : 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300'
+                }`}>
+                  {syncMessage.text}
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
     </>
