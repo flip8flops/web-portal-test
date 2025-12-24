@@ -277,7 +277,6 @@ export default function BroadcastPage() {
           className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2 leading-tight pt-1 pb-1"
           onDoubleClick={handleTitleDoubleClick}
           style={{ cursor: 'default', userSelect: 'none' }}
-          title="Double-click untuk toggle Output tab"
         >
           Broadcast Team Agent
         </h1>

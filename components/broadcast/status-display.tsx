@@ -53,6 +53,7 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
   const [statuses, setStatuses] = useState<Record<string, StatusUpdate>>({});
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncCompleted, setSyncCompleted] = useState(false);
   const [syncMessage, setSyncMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const currentIdsRef = useRef<{ campaignId: string | null; executionId: string | null | undefined }>({
     campaignId: null,
@@ -83,9 +84,7 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
       
       console.log('✅ [StatusDisplay] Sync succeeded:', result);
       setSyncMessage({ type: 'success', text: 'Sync berhasil! Data telah dikirim ke Citia.' });
-      
-      // Clear success message after 5 seconds
-      setTimeout(() => setSyncMessage(null), 5000);
+      setSyncCompleted(true);
       
     } catch (error) {
       console.error('❌ [StatusDisplay] Sync error:', error);
@@ -487,46 +486,52 @@ export function StatusDisplay({ campaignId, executionId, onProcessingChange }: S
           })}
           </div>
           
-          {/* SYNC Button - Only show when Guardrails Out is completed */}
+          {/* SYNC Button - Only show when Guardrails Out is completed and sync not done */}
           {statuses['guardrails_qc']?.status === 'completed' && (
             <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Sync ke Citia Database
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Kirim hasil draft ke database Citia untuk review & blast
-                  </p>
+              {syncCompleted ? (
+                /* Show success message after sync completed */
+                <div className="p-3 rounded-md text-sm bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300">
+                  ✅ Sync berhasil! Data telah dikirim ke Citia.
                 </div>
-                <Button
-                  onClick={handleSync}
-                  disabled={syncing}
-                  className="bg-green-600 hover:bg-green-700 text-white"
-                >
-                  {syncing ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Syncing...
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="h-4 w-4 mr-2" />
-                      SYNC
-                    </>
+              ) : (
+                /* Show SYNC button when not yet synced */
+                <>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Sync ke Citia Database
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Kirim hasil draft ke database Citia untuk review & blast
+                      </p>
+                    </div>
+                    <Button
+                      onClick={handleSync}
+                      disabled={syncing}
+                      className="bg-green-600 hover:bg-green-700 text-white"
+                    >
+                      {syncing ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Syncing...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4 mr-2" />
+                          SYNC
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  
+                  {/* Sync Error Message */}
+                  {syncMessage?.type === 'error' && (
+                    <div className="mt-3 p-3 rounded-md text-sm bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300">
+                      {syncMessage.text}
+                    </div>
                   )}
-                </Button>
-              </div>
-              
-              {/* Sync Message */}
-              {syncMessage && (
-                <div className={`mt-3 p-3 rounded-md text-sm ${
-                  syncMessage.type === 'success' 
-                    ? 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300' 
-                    : 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300'
-                }`}>
-                  {syncMessage.text}
-                </div>
+                </>
               )}
             </div>
           )}
