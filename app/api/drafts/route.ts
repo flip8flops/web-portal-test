@@ -169,7 +169,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const { data: audienceData, error: audienceError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign_audience')
-      .select('id, campaign_id, audience_id, broadcast_content, meta, target_status, scheduled_at, created_at, updated_at')
+      .select('id, campaign_id, audience_id, channel, broadcast_content, meta, target_status, scheduled_at, created_at, updated_at')
       .eq('campaign_id', latestDraftCampaignId)
       .not('broadcast_content', 'is', null)
       .neq('broadcast_content', '')
@@ -234,9 +234,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const meta = item.meta || {};
       const guardrails = meta.guardrails || {};
 
-      const isWhatsApp = detail.wa_opt_in === true;
-      const isTelegram = !isWhatsApp && !!detail.telegram_username;
-      const channel = isWhatsApp ? 'whatsapp' : isTelegram ? 'telegram' : 'whatsapp';
+      // Use channel from campaign_audience (set by Matchmaker Agent) as source of truth
+      // Fallback to audience table logic only if channel is not set
+      let channel = (item.channel || '').toLowerCase();
+      if (!channel || !['whatsapp', 'telegram', 'email'].includes(channel)) {
+        // Fallback: determine from audience table
+        const isWhatsApp = detail.wa_opt_in === true;
+        const isTelegram = !isWhatsApp && !!detail.telegram_username;
+        channel = isWhatsApp ? 'whatsapp' : isTelegram ? 'telegram' : 'whatsapp';
+      }
 
       let sendTo = '';
       if (channel === 'whatsapp') {
