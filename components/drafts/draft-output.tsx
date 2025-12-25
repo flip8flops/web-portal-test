@@ -186,7 +186,7 @@ export function DraftOutput() {
         throw new Error(errorData.error || 'Failed to send broadcasts');
       }
 
-      console.log('✅ [DraftOutput] Campaign approved and sent successfully');
+      console.log('✅ [DraftOutput] Campaign approved and broadcast triggered');
       
       // Clear current draft and show success
       setDraft(null);
@@ -394,7 +394,7 @@ export function DraftOutput() {
         {lastAction === 'approved' && (
           <Alert className="border-green-500 bg-green-50 dark:bg-green-950">
             <AlertDescription className="text-green-700 dark:text-green-300">
-              Campaign has been approved and sent successfully!
+              Campaign has been approved! Broadcast engine will send messages according to schedule.
             </AlertDescription>
           </Alert>
         )}

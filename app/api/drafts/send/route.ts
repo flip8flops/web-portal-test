@@ -6,6 +6,7 @@ export const revalidate = 0;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY!;
+const broadcastWebhookUrl = process.env.N8N_WEBHOOK_BROADCAST_URL || '';
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error('❌ Missing Supabase configuration');
@@ -13,8 +14,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 /**
  * POST /api/drafts/send
- * Send approved drafts via WhatsApp (unofficial API)
- * This is called AFTER approve endpoint updates statuses
+ * Trigger n8n internal broadcast engine webhook
+ * This is called AFTER approve endpoint updates statuses to 'approved'
+ * The actual sending is handled by n8n workflow
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // Create FRESH client for each request
@@ -41,125 +43,144 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return createResponse({ error: 'audience_ids is required and must be non-empty array' }, 400);
     }
 
-    const sendTimestamp = new Date().toISOString();
-    const results: Array<{ audience_id: string; success: boolean; error?: string }> = [];
-
-    // Process each audience
+    // Fetch full audience data for webhook payload
+    const audiences = [];
+    
     for (const audienceId of audience_ids) {
-      // Get audience data with broadcast content
-      const { data: audienceData, error: fetchError } = await supabase
+      // Get campaign_audience data
+      const { data: caData, error: caError } = await supabase
         .schema('citia_mora_datamart')
         .from('campaign_audience')
-        .select('broadcast_content, meta')
+        .select('broadcast_content, channel, scheduled_at')
         .eq('campaign_id', campaign_id)
         .eq('audience_id', audienceId)
         .single();
 
-      if (fetchError || !audienceData) {
-        results.push({ audience_id: audienceId, success: false, error: 'Failed to fetch audience data' });
+      if (caError || !caData) {
+        console.error(`Failed to fetch campaign_audience for ${audienceId}:`, caError?.message);
         continue;
       }
 
       // Get audience details
-      const { data: detail, error: detailError } = await supabase
+      const { data: audData, error: audError } = await supabase
         .schema('citia_mora_datamart')
         .from('audience')
-        .select('source_contact_id, wa_opt_in, phone_e164')
+        .select('source_contact_id, full_name, phone_e164, telegram_username')
         .eq('id', audienceId)
         .single();
 
-      if (detailError || !detail) {
-        results.push({ audience_id: audienceId, success: false, error: 'Failed to fetch audience details' });
+      if (audError || !audData) {
+        console.error(`Failed to fetch audience for ${audienceId}:`, audError?.message);
         continue;
       }
 
-      const broadcastContent = audienceData.broadcast_content;
-      const phoneNumber = detail.phone_e164 || detail.source_contact_id;
-
-      if (!broadcastContent || !phoneNumber) {
-        results.push({ audience_id: audienceId, success: false, error: 'Missing content or phone' });
-        continue;
-      }
-
-      // TODO: Call WhatsApp unofficial API
-      const sendResult = await sendWhatsAppMessage(phoneNumber, broadcastContent);
-
-      // Update status based on result
-      const currentMeta = audienceData.meta || {};
-      const newStatus = sendResult.success ? 'sent' : 'failed';
-
-      const { error: updateError } = await supabase
+      // Get campaign image URL if available
+      const { data: imageData } = await supabase
         .schema('citia_mora_datamart')
-        .from('campaign_audience')
-        .update({
-          target_status: newStatus,
-          meta: {
-            ...currentMeta,
-            send: {
-              sent_at: sendTimestamp,
-              sent_status: newStatus,
-              send_error: sendResult.error || null,
-              message_id: sendResult.messageId || null,
-            },
-          },
-          updated_at: sendTimestamp,
-        })
+        .from('campaign_asset')
+        .select('asset_id')
         .eq('campaign_id', campaign_id)
-        .eq('audience_id', audienceId);
+        .limit(1)
+        .single();
 
-      if (updateError) {
-        console.error(`Error updating send status for ${audienceId}:`, updateError.message);
+      let imageUrl = null;
+      if (imageData?.asset_id) {
+        const { data: assetData } = await supabase
+          .schema('citia_mora_datamart')
+          .from('asset')
+          .select('media_url')
+          .eq('id', imageData.asset_id)
+          .eq('type', 'image')
+          .single();
+        imageUrl = assetData?.media_url || null;
       }
 
-      results.push({
+      audiences.push({
         audience_id: audienceId,
-        success: sendResult.success,
-        error: sendResult.error,
+        campaign_id,
+        full_name: audData.full_name || 'Unknown',
+        source_contact_id: audData.source_contact_id,
+        phone_e164: audData.phone_e164,
+        telegram_username: audData.telegram_username,
+        channel: caData.channel || 'whatsapp',
+        broadcast_content: caData.broadcast_content,
+        scheduled_at: caData.scheduled_at,
+        image_url: imageUrl,
       });
     }
 
-    // Update campaign status to 'sent' if all were successful
-    const successCount = results.filter(r => r.success).length;
-    const failedCount = results.filter(r => !r.success).length;
+    console.log(`📤 [POST /api/drafts/send] Prepared ${audiences.length} audiences for webhook`);
 
-    if (successCount > 0) {
-      console.log('📝 Updating campaign status to sent...');
-      await supabase
-        .schema('citia_mora_datamart')
-        .from('campaign')
-        .update({
-          status: 'sent',
-          updated_at: sendTimestamp,
-        })
-        .eq('id', campaign_id);
-
-      // Insert status update
-      await supabase
-        .schema('citia_mora_datamart')
-        .from('campaign_status_updates')
-        .insert({
-          campaign_id,
-          agent_name: 'broadcast_send',
-          status: 'completed',
-          message: 'cpgSent',
-          progress: 100,
-          metadata: {
-            workflow_point: 'broadcast_sent',
-            sent_count: successCount,
-            failed_count: failedCount,
-            sent_at: sendTimestamp,
+    // Trigger n8n webhook if configured
+    let webhookResult = { success: false, message: 'No webhook URL configured' };
+    
+    if (broadcastWebhookUrl) {
+      try {
+        console.log(`📤 [POST /api/drafts/send] Triggering webhook: ${broadcastWebhookUrl}`);
+        
+        const webhookResponse = await fetch(broadcastWebhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
           },
+          body: JSON.stringify({
+            campaign_id,
+            audiences,
+            triggered_at: new Date().toISOString(),
+            triggered_by: 'web_portal',
+          }),
         });
+
+        if (webhookResponse.ok) {
+          webhookResult = { success: true, message: 'Webhook triggered successfully' };
+          console.log(`✅ [POST /api/drafts/send] Webhook triggered successfully`);
+        } else {
+          const errorText = await webhookResponse.text();
+          webhookResult = { 
+            success: false, 
+            message: `Webhook failed: ${webhookResponse.status} ${errorText}` 
+          };
+          console.error(`❌ [POST /api/drafts/send] Webhook failed:`, errorText);
+        }
+      } catch (webhookError: any) {
+        webhookResult = { 
+          success: false, 
+          message: `Webhook error: ${webhookError.message}` 
+        };
+        console.error(`❌ [POST /api/drafts/send] Webhook error:`, webhookError.message);
+      }
+    } else {
+      console.warn(`⚠️ [POST /api/drafts/send] No webhook URL configured, skipping trigger`);
+      // Still return success - the approval was done, sending will be manual
+      webhookResult = { success: true, message: 'No webhook configured - send manually' };
     }
 
-    console.log(`✅ [POST /api/drafts/send] Sent: ${successCount}, Failed: ${failedCount}`);
+    // Insert status update record
+    const sendTimestamp = new Date().toISOString();
+    await supabase
+      .schema('citia_mora_datamart')
+      .from('campaign_status_updates')
+      .insert({
+        campaign_id,
+        agent_name: 'broadcast_send',
+        status: webhookResult.success ? 'completed' : 'error',
+        message: 'cpgBroadcastTriggered',
+        progress: 100,
+        metadata: {
+          workflow_point: 'broadcast_triggered',
+          audience_count: audiences.length,
+          webhook_result: webhookResult,
+          triggered_at: sendTimestamp,
+        },
+      });
+
     console.log(`📤 [POST /api/drafts/send] ==========================================\n`);
 
     return createResponse({
       success: true,
-      results,
-      sent_count: successCount,
-      failed_count: failedCount,
+      message: 'Broadcast triggered',
+      audience_count: audiences.length,
+      webhook_result: webhookResult,
     });
   } catch (error: any) {
     console.error('❌ Error:', error);
@@ -168,33 +189,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       details: error?.message,
     }, 500);
   }
-}
-
-/**
- * Send WhatsApp message via unofficial API
- * TODO: Replace with actual WhatsApp API implementation
- */
-async function sendWhatsAppMessage(
-  phoneNumber: string,
-  message: string
-): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  // Format phone number
-  let phone = phoneNumber;
-  if (phone.includes(':')) {
-    phone = phone.split(':')[1];
-  }
-  phone = phone.replace(/^\+/, '');
-
-  console.log(`[SIMULATED] Sending WhatsApp to ${phone}: ${message.substring(0, 50)}...`);
-  
-  // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 200));
-
-  // TODO: Replace with actual API call
-  return {
-    success: true,
-    messageId: `sim_${Date.now()}`,
-  };
 }
 
 function createResponse(data: any, status: number = 200): NextResponse {
