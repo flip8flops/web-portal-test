@@ -44,32 +44,39 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     // Get campaign image URL once (outside loop, same for all audiences)
+    // Use same robust query logic as GET /api/drafts
     let imageUrl = null;
-    const { data: imageData, error: imageError } = await supabase
+    const { data: campaignAssets, error: caError } = await supabase
       .schema('citia_mora_datamart')
       .from('campaign_asset')
       .select('asset_id')
-      .eq('campaign_id', campaign_id)
-      .limit(1)
-      .maybeSingle(); // Use maybeSingle() instead of single() to handle no data gracefully
-
-    if (!imageError && imageData?.asset_id) {
-      const { data: assetData, error: assetError } = await supabase
+      .eq('campaign_id', campaign_id);
+    
+    if (!caError && campaignAssets && campaignAssets.length > 0) {
+      const assetIds = campaignAssets.map((ca: any) => ca.asset_id);
+      
+      // Get assets and filter for images
+      const { data: assets, error: assetError } = await supabase
         .schema('citia_mora_datamart')
         .from('asset')
-        .select('media_url')
-        .eq('id', imageData.asset_id)
-        .eq('type', 'image')
-        .maybeSingle(); // Use maybeSingle() instead of single()
+        .select('id, type, media_url, usage_type')
+        .in('id', assetIds)
+        .eq('type', 'image');
       
-      if (!assetError && assetData?.media_url) {
-        imageUrl = assetData.media_url;
-        console.log(`📤 [POST /api/drafts/send] Found image URL: ${imageUrl}`);
+      if (!assetError && assets && assets.length > 0) {
+        // Prefer primary_visual, otherwise take first image
+        const primaryImage = assets.find((a: any) => a.usage_type === 'primary_visual');
+        const imageAsset = primaryImage || assets[0];
+        
+        if (imageAsset && imageAsset.media_url) {
+          imageUrl = imageAsset.media_url;
+          console.log(`📤 [POST /api/drafts/send] Found image URL: ${imageUrl.substring(0, 80)}...`);
+        }
       } else {
-        console.warn(`⚠️ [POST /api/drafts/send] Asset not found or not an image:`, assetError?.message);
+        console.warn(`⚠️ [POST /api/drafts/send] No image assets found:`, assetError?.message);
       }
     } else {
-      console.log(`ℹ️ [POST /api/drafts/send] No campaign asset found for campaign ${campaign_id}`);
+      console.log(`ℹ️ [POST /api/drafts/send] No campaign assets found for campaign ${campaign_id}:`, caError?.message);
     }
 
     // Fetch full audience data for webhook payload
@@ -163,8 +170,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       webhookResult = { success: true, message: 'No webhook configured - send manually' };
     }
 
-    // Insert status update record
+    // Update campaign status to 'sent' so it won't appear in drafts anymore
     const sendTimestamp = new Date().toISOString();
+    const { error: campaignUpdateError } = await supabase
+      .schema('citia_mora_datamart')
+      .from('campaign')
+      .update({
+        status: 'sent',
+        updated_at: sendTimestamp,
+      })
+      .eq('id', campaign_id);
+
+    if (campaignUpdateError) {
+      console.error(`❌ [POST /api/drafts/send] Failed to update campaign status:`, campaignUpdateError.message);
+    } else {
+      console.log(`✅ [POST /api/drafts/send] Campaign status updated to 'sent'`);
+    }
+
+    // Insert status update record
     await supabase
       .schema('citia_mora_datamart')
       .from('campaign_status_updates')
