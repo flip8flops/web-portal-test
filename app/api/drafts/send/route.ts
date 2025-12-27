@@ -170,24 +170,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       webhookResult = { success: true, message: 'No webhook configured - send manually' };
     }
 
-    // Update campaign status to 'sent' so it won't appear in drafts anymore
-    const sendTimestamp = new Date().toISOString();
-    const { error: campaignUpdateError } = await supabase
-      .schema('citia_mora_datamart')
-      .from('campaign')
-      .update({
-        status: 'sent',
-        updated_at: sendTimestamp,
-      })
-      .eq('id', campaign_id);
-
-    if (campaignUpdateError) {
-      console.error(`❌ [POST /api/drafts/send] Failed to update campaign status:`, campaignUpdateError.message);
-    } else {
-      console.log(`✅ [POST /api/drafts/send] Campaign status updated to 'sent'`);
-    }
-
     // Insert status update record
+    // Note: campaign.status update to 'sent' is handled by n8n workflow (Update Sent Status node)
+    // which updates campaign_audience.target_status, not campaign.status
+    const sendTimestamp = new Date().toISOString();
     await supabase
       .schema('citia_mora_datamart')
       .from('campaign_status_updates')
