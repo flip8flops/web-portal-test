@@ -43,6 +43,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return createResponse({ error: 'audience_ids is required and must be non-empty array' }, 400);
     }
 
+    // Get campaign image URL once (outside loop, same for all audiences)
+    let imageUrl = null;
+    const { data: imageData, error: imageError } = await supabase
+      .schema('citia_mora_datamart')
+      .from('campaign_asset')
+      .select('asset_id')
+      .eq('campaign_id', campaign_id)
+      .limit(1)
+      .maybeSingle(); // Use maybeSingle() instead of single() to handle no data gracefully
+
+    if (!imageError && imageData?.asset_id) {
+      const { data: assetData, error: assetError } = await supabase
+        .schema('citia_mora_datamart')
+        .from('asset')
+        .select('media_url')
+        .eq('id', imageData.asset_id)
+        .eq('type', 'image')
+        .maybeSingle(); // Use maybeSingle() instead of single()
+      
+      if (!assetError && assetData?.media_url) {
+        imageUrl = assetData.media_url;
+        console.log(`📤 [POST /api/drafts/send] Found image URL: ${imageUrl}`);
+      } else {
+        console.warn(`⚠️ [POST /api/drafts/send] Asset not found or not an image:`, assetError?.message);
+      }
+    } else {
+      console.log(`ℹ️ [POST /api/drafts/send] No campaign asset found for campaign ${campaign_id}`);
+    }
+
     // Fetch full audience data for webhook payload
     const audiences = [];
     
@@ -74,27 +103,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         continue;
       }
 
-      // Get campaign image URL if available
-      const { data: imageData } = await supabase
-        .schema('citia_mora_datamart')
-        .from('campaign_asset')
-        .select('asset_id')
-        .eq('campaign_id', campaign_id)
-        .limit(1)
-        .single();
-
-      let imageUrl = null;
-      if (imageData?.asset_id) {
-        const { data: assetData } = await supabase
-          .schema('citia_mora_datamart')
-          .from('asset')
-          .select('media_url')
-          .eq('id', imageData.asset_id)
-          .eq('type', 'image')
-          .single();
-        imageUrl = assetData?.media_url || null;
-      }
-
       audiences.push({
         audience_id: audienceId,
         campaign_id,
@@ -105,7 +113,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         channel: caData.channel || 'whatsapp',
         broadcast_content: caData.broadcast_content,
         scheduled_at: caData.scheduled_at,
-        image_url: imageUrl,
+        image_url: imageUrl, // Use the same imageUrl for all audiences
       });
     }
 
